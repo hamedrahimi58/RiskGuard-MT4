@@ -1,0 +1,30 @@
+#ifndef RG_GUI_MQH
+#define RG_GUI_MQH
+
+bool RG_CreatePanel()
+{
+   if(ObjectFind(0,RG_PANEL_NAME)>=0)
+      ObjectDelete(0,RG_PANEL_NAME);
+
+   if(!ObjectCreate(0,RG_PANEL_NAME,OBJ_RECTANGLE_LABEL,0,0,0))
+      return(false);
+
+   ObjectSetInteger(0,RG_PANEL_NAME,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,RG_PANEL_NAME,OBJPROP_XDISTANCE,PanelX);
+   ObjectSetInteger(0,RG_PANEL_NAME,OBJPROP_YDISTANCE,PanelY);
+
+   ObjectSetInteger(0,RG_PANEL_NAME,OBJPROP_XSIZE,PanelWidth);
+   ObjectSetInteger(0,RG_PANEL_NAME,OBJPROP_YSIZE,PanelHeight);
+
+   ObjectSetInteger(0,RG_PANEL_NAME,OBJPROP_BGCOLOR,clrDimGray);
+   ObjectSetInteger(0,RG_PANEL_NAME,OBJPROP_BORDER_TYPE,BORDER_FLAT);
+
+   return(true);
+}
+
+void RG_DeletePanel()
+{
+   ObjectDelete(0,RG_PANEL_NAME);
+}
+
+#endif
