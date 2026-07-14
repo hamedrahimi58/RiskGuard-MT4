@@ -26,10 +26,16 @@ enum RG_LotMode
 
 input RG_LotMode LotMode = LOT_FIXED;
 
-// Fixed Lot
 input double FixedLot = 0.01;
 
-// Risk Percent
 input double RiskPercent = 1.0;
+
+
+//====================================================
+// STOP LOSS
+//====================================================
+
+input bool   UseStopLoss = true;
+input int    StopLoss = 200;
 
 #endif
