@@ -1,152 +1,120 @@
-#ifndef __RG_TRADE_MQH__
-#define __RG_TRADE_MQH__
-
-#include <RG_Settings.mqh>
-#include <Trade/RG_PositionSizer.mqh>
+#ifndef __RG_BROKER_MQH__
+#define __RG_BROKER_MQH__
 
 //====================================================
-// Modify Order
+// Broker Digits
 //====================================================
-bool RG_ModifyOrder(
-   const int ticket,
-   const double sl,
-   const double tp)
+int RG_Digits()
 {
-   if(ticket <= 0)
-   
-      return(false);
-
-   if(!OrderSelect(ticket,SELECT_BY_TICKET))
-   {
-      Print("OrderSelect Error : ",GetLastError());
-      return(false);
-   }
-
-   bool result = OrderModify(
-      OrderTicket(),
-      OrderOpenPrice(),
-      sl,
-      tp,
-      0,
-      clrNONE);
-
-   if(!result)
-   {
-      Print("Modify Error : ",GetLastError());
-      return(false);
-   }
-
-   return(true);
+   return((int)MarketInfo(Symbol(),MODE_DIGITS));
 }
 
 //====================================================
-// Send BUY
+// Broker Point
 //====================================================
-int RG_SendBuyOrder()
+double RG_Point()
 {
-   RefreshRates();
-
-   double lot   = RG_GetVolume();
-   double price = Ask;
-
-   int ticket = OrderSend(
-      Symbol(),
-      OP_BUY,
-      lot,
-      price,
-      10,
-      0,
-      0,
-      "RiskGuard BUY",
-      0,
-      0,
-      clrLime);
-
-   if(ticket < 0)
-   {
-      Print("BUY Error : ",GetLastError());
-      return(-1);
-   }
-
-   Print("BUY Ticket : ",ticket);
-
-   // ECN StopLoss
-   if(UseStopLoss)
-   {
-      if(OrderSelect(ticket,SELECT_BY_TICKET))
-      {
-         double sl = NormalizeDouble(
-            OrderOpenPrice() - StopLoss * Point,
-            Digits);
-
-         RG_ModifyOrder(ticket,sl,0);
-      }
-   }
-
-   return(ticket);
+   return(MarketInfo(Symbol(),MODE_POINT));
 }
 
 //====================================================
-// Send SELL
+// Stop Level (Points)
 //====================================================
-int RG_SendSellOrder()
+int RG_StopLevel()
 {
-   RefreshRates();
-
-   double lot   = RG_GetVolume();
-   double price = Bid;
-
-   int ticket = OrderSend(
-      Symbol(),
-      OP_SELL,
-      lot,
-      price,
-      10,
-      0,
-      0,
-      "RiskGuard SELL",
-      0,
-      0,
-      clrRed);
-
-   if(ticket < 0)
-   {
-      Print("SELL Error : ",GetLastError());
-      return(-1);
-   }
-
-   Print("SELL Ticket : ",ticket);
-
-   // ECN StopLoss
-   if(UseStopLoss)
-   {
-      if(OrderSelect(ticket,SELECT_BY_TICKET))
-      {
-         double sl = NormalizeDouble(
-            OrderOpenPrice() + StopLoss * Point,
-            Digits);
-
-         RG_ModifyOrder(ticket,sl,0);
-      }
-   }
-
-   return(ticket);
+   return((int)MarketInfo(Symbol(),MODE_STOPLEVEL));
 }
 
 //====================================================
-// BUY Wrapper
+// Freeze Level (Points)
 //====================================================
-bool RG_Buy()
+int RG_FreezeLevel()
 {
-   return(RG_SendBuyOrder()>0);
+   return((int)MarketInfo(Symbol(),MODE_FREEZELEVEL));
 }
 
 //====================================================
-// SELL Wrapper
+// Stop Level Price Distance
 //====================================================
-bool RG_Sell()
+double RG_StopLevelPrice()
 {
-   return(RG_SendSellOrder()>0);
+   return(RG_StopLevel()*RG_Point());
+}
+
+//====================================================
+// Normalize Price
+//====================================================
+double RG_NormalizePrice(double price)
+{
+   return(NormalizeDouble(price,RG_Digits()));
+}
+
+//====================================================
+// Minimum Lot
+//====================================================
+double RG_MinLot()
+{
+   return(MarketInfo(Symbol(),MODE_MINLOT));
+}
+
+//====================================================
+// Maximum Lot
+//====================================================
+double RG_MaxLot()
+{
+   return(MarketInfo(Symbol(),MODE_MAXLOT));
+}
+
+//====================================================
+// Lot Step
+//====================================================
+double RG_LotStep()
+{
+   return(MarketInfo(Symbol(),MODE_LOTSTEP));
+}
+
+//====================================================
+// Normalize Lot
+//====================================================
+double RG_NormalizeLot(double lot)
+{
+   double step = RG_LotStep();
+
+   lot = MathFloor(lot/step)*step;
+
+   if(lot < RG_MinLot())
+      lot = RG_MinLot();
+
+   if(lot > RG_MaxLot())
+      lot = RG_MaxLot();
+
+   return(NormalizeDouble(lot,2));
+}
+
+//====================================================
+// Correct BUY StopLoss
+//====================================================
+double RG_CorrectBuySL(double sl,double openPrice)
+{
+   double minDistance = RG_StopLevelPrice();
+
+   if(openPrice-sl < minDistance)
+      sl = openPrice-minDistance;
+
+   return(RG_NormalizePrice(sl));
+}
+
+//====================================================
+// Correct SELL StopLoss
+//====================================================
+double RG_CorrectSellSL(double sl,double openPrice)
+{
+   double minDistance = RG_StopLevelPrice();
+
+   if(sl-openPrice < minDistance)
+      sl = openPrice+minDistance;
+
+   return(RG_NormalizePrice(sl));
 }
 
 #endif

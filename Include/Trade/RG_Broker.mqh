@@ -18,7 +18,7 @@ double RG_Point()
 }
 
 //====================================================
-// Stop Level
+// Stop Level (Points)
 //====================================================
 int RG_StopLevel()
 {
@@ -26,11 +26,27 @@ int RG_StopLevel()
 }
 
 //====================================================
-// Freeze Level
+// Freeze Level (Points)
 //====================================================
 int RG_FreezeLevel()
 {
    return((int)MarketInfo(Symbol(),MODE_FREEZELEVEL));
+}
+
+//====================================================
+// Stop Level Price Distance
+//====================================================
+double RG_StopLevelPrice()
+{
+   return(RG_StopLevel()*RG_Point());
+}
+
+//====================================================
+// Normalize Price
+//====================================================
+double RG_NormalizePrice(double price)
+{
+   return(NormalizeDouble(price,RG_Digits()));
 }
 
 //====================================================
@@ -58,45 +74,47 @@ double RG_LotStep()
 }
 
 //====================================================
-// Tick Value
-//====================================================
-double RG_TickValue()
-{
-   return(MarketInfo(Symbol(),MODE_TICKVALUE));
-}
-
-//====================================================
-// Tick Size
-//====================================================
-double RG_TickSize()
-{
-   return(MarketInfo(Symbol(),MODE_TICKSIZE));
-}
-
-//====================================================
-// Normalize Price
-//====================================================
-double RG_NormalizePrice(double price)
-{
-   return(NormalizeDouble(price,RG_Digits()));
-}
-
-//====================================================
 // Normalize Lot
 //====================================================
 double RG_NormalizeLot(double lot)
 {
-   double step=RG_LotStep();
+   double step = RG_LotStep();
 
-   lot=MathFloor(lot/step)*step;
+   lot = MathFloor(lot/step)*step;
 
-   if(lot<RG_MinLot())
-      lot=RG_MinLot();
+   if(lot < RG_MinLot())
+      lot = RG_MinLot();
 
-   if(lot>RG_MaxLot())
-      lot=RG_MaxLot();
+   if(lot > RG_MaxLot())
+      lot = RG_MaxLot();
 
    return(NormalizeDouble(lot,2));
+}
+
+//====================================================
+// Correct BUY StopLoss
+//====================================================
+double RG_CorrectBuySL(double sl,double openPrice)
+{
+   double minDistance = RG_StopLevelPrice();
+
+   if(openPrice-sl < minDistance)
+      sl = openPrice-minDistance;
+
+   return(RG_NormalizePrice(sl));
+}
+
+//====================================================
+// Correct SELL StopLoss
+//====================================================
+double RG_CorrectSellSL(double sl,double openPrice)
+{
+   double minDistance = RG_StopLevelPrice();
+
+   if(sl-openPrice < minDistance)
+      sl = openPrice+minDistance;
+
+   return(RG_NormalizePrice(sl));
 }
 
 #endif
