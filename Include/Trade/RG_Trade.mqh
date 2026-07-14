@@ -1,16 +1,19 @@
 #ifndef __RG_TRADE_MQH__
 #define __RG_TRADE_MQH__
 
+#include <Trade/RG_PositionSizer.mqh>
+
 //====================================================
 // BUY
 //====================================================
-bool RG_Buy(double lot=0.01)
+bool RG_Buy()
 {
    RefreshRates();
 
-   double price=Ask;
+   double lot = RG_GetVolume();
+   double price = Ask;
 
-   int ticket=OrderSend(
+   int ticket = OrderSend(
       Symbol(),
       OP_BUY,
       lot,
@@ -23,13 +26,13 @@ bool RG_Buy(double lot=0.01)
       0,
       clrLime);
 
-   if(ticket<0)
+   if(ticket < 0)
    {
-      Print("BUY Error : ",GetLastError());
+      Print("BUY Error : ", GetLastError());
       return(false);
    }
 
-   Print("BUY Ticket : ",ticket);
+   Print("BUY Ticket : ", ticket);
 
    return(true);
 }
@@ -37,13 +40,14 @@ bool RG_Buy(double lot=0.01)
 //====================================================
 // SELL
 //====================================================
-bool RG_Sell(double lot=0.01)
+bool RG_Sell()
 {
    RefreshRates();
 
-   double price=Bid;
+   double lot = RG_GetVolume();
+   double price = Bid;
 
-   int ticket=OrderSend(
+   int ticket = OrderSend(
       Symbol(),
       OP_SELL,
       lot,
@@ -56,13 +60,13 @@ bool RG_Sell(double lot=0.01)
       0,
       clrRed);
 
-   if(ticket<0)
+   if(ticket < 0)
    {
-      Print("SELL Error : ",GetLastError());
+      Print("SELL Error : ", GetLastError());
       return(false);
    }
 
-   Print("SELL Ticket : ",ticket);
+   Print("SELL Ticket : ", ticket);
 
    return(true);
 }
