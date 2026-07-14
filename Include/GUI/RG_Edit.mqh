@@ -28,11 +28,10 @@ bool RG_CreateEdit(
 
    ObjectSetInteger(0,name,OBJPROP_BGCOLOR,backColor);
    ObjectSetInteger(0,name,OBJPROP_COLOR,textColor);
-
    ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,clrSilver);
 
+   ObjectSetString(0,name,OBJPROP_FONT,"Arial");
    ObjectSetInteger(0,name,OBJPROP_FONTSIZE,10);
-   ObjectSetString (0,name,OBJPROP_FONT,"Arial");
 
    ObjectSetString(0,name,OBJPROP_TEXT,text);
 
@@ -57,15 +56,21 @@ void RG_DeleteEdit(string name)
 //====================================================
 string RG_GetEditText(string name)
 {
+   if(ObjectFind(0,name)<0)
+      return("");
+
    return(ObjectGetString(0,name,OBJPROP_TEXT));
 }
 
 //====================================================
 // Set Edit Text
 //====================================================
-void RG_SetEditText(string name,string value)
+void RG_SetEditText(
+   string name,
+   string text)
 {
-   ObjectSetString(0,name,OBJPROP_TEXT,value);
+   if(ObjectFind(0,name)>=0)
+      ObjectSetString(0,name,OBJPROP_TEXT,text);
 }
 
 #endif
