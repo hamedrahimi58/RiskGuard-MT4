@@ -1,41 +1,32 @@
-#ifndef RG_SETTINGS_MQH
-#define RG_SETTINGS_MQH
+#ifndef __RG_SETTINGS_MQH__
+#define __RG_SETTINGS_MQH__
 
 //====================================================
-// PANEL
+// Panel Position
 //====================================================
-
-#define RG_PANEL_NAME "RG_PANEL"
-
 input int PanelX = 20;
 input int PanelY = 20;
 
-input int PanelWidth  = 300;
-input int PanelHeight = 220;
-
+//====================================================
+// Panel Size
+//====================================================
+input int PanelWidth  = 320;
+input int PanelHeight = 230;
 
 //====================================================
-// POSITION SIZE
+// Trading
 //====================================================
-
-enum RG_LotMode
-{
-   LOT_FIXED = 0,
-   LOT_RISK  = 1
-};
-
-input RG_LotMode LotMode = LOT_FIXED;
-
 input double FixedLot = 0.01;
 
+input bool UseStopLoss = true;
+input int  StopLoss    = 200;
+
+input bool UseTakeProfit = false;
+input int  TakeProfit    = 400;
+
+//====================================================
+// Risk
+//====================================================
 input double RiskPercent = 1.0;
-
-
-//====================================================
-// STOP LOSS
-//====================================================
-
-input bool   UseStopLoss = true;
-input int    StopLoss = 200;
 
 #endif
