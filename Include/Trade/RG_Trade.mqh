@@ -12,11 +12,18 @@ bool RG_ModifyOrder(
    const double sl,
    const double tp)
 {
-   if(!OrderSelect(ticket,SELECT_BY_TICKET))
+   if(ticket <= 0)
+   
       return(false);
 
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
+   {
+      Print("OrderSelect Error : ",GetLastError());
+      return(false);
+   }
+
    bool result = OrderModify(
-      ticket,
+      OrderTicket(),
       OrderOpenPrice(),
       sl,
       tp,
@@ -33,19 +40,20 @@ bool RG_ModifyOrder(
 }
 
 //====================================================
-// Send BUY Order
+// Send BUY
 //====================================================
 int RG_SendBuyOrder()
 {
    RefreshRates();
 
-   double lot = RG_GetVolume();
+   double lot   = RG_GetVolume();
+   double price = Ask;
 
    int ticket = OrderSend(
       Symbol(),
       OP_BUY,
       lot,
-      Ask,
+      price,
       10,
       0,
       0,
@@ -62,23 +70,37 @@ int RG_SendBuyOrder()
 
    Print("BUY Ticket : ",ticket);
 
+   // ECN StopLoss
+   if(UseStopLoss)
+   {
+      if(OrderSelect(ticket,SELECT_BY_TICKET))
+      {
+         double sl = NormalizeDouble(
+            OrderOpenPrice() - StopLoss * Point,
+            Digits);
+
+         RG_ModifyOrder(ticket,sl,0);
+      }
+   }
+
    return(ticket);
 }
 
 //====================================================
-// Send SELL Order
+// Send SELL
 //====================================================
 int RG_SendSellOrder()
 {
    RefreshRates();
 
-   double lot = RG_GetVolume();
+   double lot   = RG_GetVolume();
+   double price = Bid;
 
    int ticket = OrderSend(
       Symbol(),
       OP_SELL,
       lot,
-      Bid,
+      price,
       10,
       0,
       0,
@@ -94,6 +116,19 @@ int RG_SendSellOrder()
    }
 
    Print("SELL Ticket : ",ticket);
+
+   // ECN StopLoss
+   if(UseStopLoss)
+   {
+      if(OrderSelect(ticket,SELECT_BY_TICKET))
+      {
+         double sl = NormalizeDouble(
+            OrderOpenPrice() + StopLoss * Point,
+            Digits);
+
+         RG_ModifyOrder(ticket,sl,0);
+      }
+   }
 
    return(ticket);
 }
