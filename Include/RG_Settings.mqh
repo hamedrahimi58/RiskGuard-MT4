@@ -29,4 +29,15 @@ input int  TakeProfit    = 400;
 //====================================================
 input double RiskPercent = 1.0;
 
+//====================================================
+// Lot Mode
+//====================================================
+enum ENUM_RG_LOT_MODE
+{
+   LOT_FIXED = 0,
+   LOT_RISK  = 1
+};
+
+input ENUM_RG_LOT_MODE LotMode = LOT_FIXED;
+
 #endif
