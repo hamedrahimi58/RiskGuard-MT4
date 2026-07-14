@@ -5,6 +5,34 @@
 #include <Trade/RG_PositionSizer.mqh>
 
 //====================================================
+// Modify Order
+//====================================================
+bool RG_ModifyOrder(
+   const int ticket,
+   const double sl,
+   const double tp)
+{
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
+      return(false);
+
+   bool result = OrderModify(
+      ticket,
+      OrderOpenPrice(),
+      sl,
+      tp,
+      0,
+      clrNONE);
+
+   if(!result)
+   {
+      Print("Modify Error : ",GetLastError());
+      return(false);
+   }
+
+   return(true);
+}
+
+//====================================================
 // Send BUY Order
 //====================================================
 int RG_SendBuyOrder()
@@ -28,11 +56,11 @@ int RG_SendBuyOrder()
 
    if(ticket < 0)
    {
-      Print("BUY Error : ", GetLastError());
+      Print("BUY Error : ",GetLastError());
       return(-1);
    }
 
-   Print("BUY Ticket : ", ticket);
+   Print("BUY Ticket : ",ticket);
 
    return(ticket);
 }
@@ -61,11 +89,11 @@ int RG_SendSellOrder()
 
    if(ticket < 0)
    {
-      Print("SELL Error : ", GetLastError());
+      Print("SELL Error : ",GetLastError());
       return(-1);
    }
 
-   Print("SELL Ticket : ", ticket);
+   Print("SELL Ticket : ",ticket);
 
    return(ticket);
 }
@@ -75,7 +103,7 @@ int RG_SendSellOrder()
 //====================================================
 bool RG_Buy()
 {
-   return(RG_SendBuyOrder() > 0);
+   return(RG_SendBuyOrder()>0);
 }
 
 //====================================================
@@ -83,7 +111,7 @@ bool RG_Buy()
 //====================================================
 bool RG_Sell()
 {
-   return(RG_SendSellOrder() > 0);
+   return(RG_SendSellOrder()>0);
 }
 
 #endif
