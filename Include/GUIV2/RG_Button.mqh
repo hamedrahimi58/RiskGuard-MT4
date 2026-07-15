@@ -66,6 +66,21 @@ void RG_SetButtonTextV2(
 }
 
 //====================================================
+// Set Button Colors
+//====================================================
+void RG_SetButtonColorV2(
+   const string name,
+   const color backColor,
+   const color textColor)
+{
+   if(ObjectFind(0,name)<0)
+      return;
+
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,backColor);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,textColor);
+}
+
+//====================================================
 // Enable / Disable Button
 //====================================================
 void RG_EnableButtonV2(
