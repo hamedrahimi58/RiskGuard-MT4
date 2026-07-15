@@ -3,25 +3,39 @@
 
 #include <RG_Settings.mqh>
 #include <Trade/RG_Broker.mqh>
+#include <GUI/RG_Edit.mqh>
+#include <Core/RG_Defines.mqh>
 
 //====================================================
 // Return Trading Volume
 //====================================================
 double RG_GetVolume()
 {
+   //--------------------------------------------------
+   // Read Lot From GUI
+   //--------------------------------------------------
    double lot = FixedLot;
 
+   string txt = RG_GetEditText(RG_PREFIX+"LOT");
+
+   if(StringLen(txt) > 0)
+   {
+      double guiLot = StrToDouble(txt);
+
+      if(guiLot > 0)
+         lot = guiLot;
+   }
+
+   //--------------------------------------------------
+   // Future Lot Modes
+   //--------------------------------------------------
    switch(LotMode)
    {
       case LOT_FIXED:
-         lot = FixedLot;
          break;
 
       case LOT_RISK:
-         // Temporary
-         // Real calculation will be added
-         // after Risk Engine is completed.
-         lot = FixedLot;
+         // Risk Engine will be implemented later.
          break;
    }
 
