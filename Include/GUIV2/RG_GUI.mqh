@@ -3,13 +3,15 @@
 
 #include "RG_Window.mqh"
 #include "RG_Label.mqh"
+#include "RG_InputView.mqh"
 
 //--------------------------------------------------
 // Names
 //--------------------------------------------------
-#define RGV2_WINDOW   "RGV2_WINDOW"
-#define RGV2_TITLE    "RGV2_TITLE"
-#define RGV2_STATUS   "RGV2_STATUS"
+#define RGV2_WINDOW      "RGV2_WINDOW"
+#define RGV2_TITLE       "RGV2_TITLE"
+#define RGV2_STATUS      "RGV2_STATUS"
+#define RGV2_LOT_INPUT   "RGV2_LOT_INPUT"
 
 //--------------------------------------------------
 // Create GUI
@@ -45,6 +47,14 @@ bool RG_CreateGUIV2(
       clrLime,
       10);
 
+   RG_CreateInputV2(
+      RGV2_LOT_INPUT,
+      "0.10",
+      x+15,
+      y+60,
+      80,
+      22);
+
    return(true);
 }
 
@@ -53,6 +63,8 @@ bool RG_CreateGUIV2(
 //--------------------------------------------------
 void RG_DeleteGUIV2()
 {
+   RG_DeleteInputV2(RGV2_LOT_INPUT);
+
    RG_DeleteLabelV2(RGV2_TITLE);
    RG_DeleteLabelV2(RGV2_STATUS);
 
