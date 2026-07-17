@@ -8,7 +8,9 @@ enum ENUM_RG_EVENT
 {
    RG_EVENT_NONE = 0,
    RG_EVENT_BUTTON_CLICK,
-   RG_EVENT_INPUT_CHANGED
+   RG_EVENT_INPUT_CHANGED,
+   RG_EVENT_INPUT_FOCUS,
+   RG_EVENT_INPUT_UNFOCUS
 };
 
 //====================================================
@@ -52,11 +54,41 @@ void RG_SetInputChangedEvent(
 }
 
 //====================================================
+// Input Focus
+//====================================================
+void RG_SetInputFocusEvent(
+   RGEvent &evt,
+   const string controlName)
+{
+   evt.Type = RG_EVENT_INPUT_FOCUS;
+   evt.ControlName = controlName;
+}
+
+//====================================================
+// Input Unfocus
+//====================================================
+void RG_SetInputUnfocusEvent(
+   RGEvent &evt,
+   const string controlName)
+{
+   evt.Type = RG_EVENT_INPUT_UNFOCUS;
+   evt.ControlName = controlName;
+}
+
+//====================================================
 // Has Event
 //====================================================
 bool RG_HasEvent(const RGEvent &evt)
 {
    return(evt.Type != RG_EVENT_NONE);
+}
+
+//====================================================
+// Reset Event
+//====================================================
+void RG_ResetEvent(RGEvent &evt)
+{
+   RG_ClearEvent(evt);
 }
 
 #endif
