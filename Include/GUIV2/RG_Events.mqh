@@ -34,9 +34,7 @@ void RG_ClearEvent(RGEvent &evt)
 //====================================================
 // Button Click
 //====================================================
-void RG_SetButtonClickEvent(
-   RGEvent &evt,
-   const string controlName)
+void RG_SetButtonClickEvent(RGEvent &evt,const string controlName)
 {
    evt.Type = RG_EVENT_BUTTON_CLICK;
    evt.ControlName = controlName;
@@ -45,9 +43,7 @@ void RG_SetButtonClickEvent(
 //====================================================
 // Input Changed
 //====================================================
-void RG_SetInputChangedEvent(
-   RGEvent &evt,
-   const string controlName)
+void RG_SetInputChangedEvent(RGEvent &evt,const string controlName)
 {
    evt.Type = RG_EVENT_INPUT_CHANGED;
    evt.ControlName = controlName;
@@ -56,9 +52,7 @@ void RG_SetInputChangedEvent(
 //====================================================
 // Input Focus
 //====================================================
-void RG_SetInputFocusEvent(
-   RGEvent &evt,
-   const string controlName)
+void RG_SetInputFocusEvent(RGEvent &evt,const string controlName)
 {
    evt.Type = RG_EVENT_INPUT_FOCUS;
    evt.ControlName = controlName;
@@ -67,9 +61,7 @@ void RG_SetInputFocusEvent(
 //====================================================
 // Input Unfocus
 //====================================================
-void RG_SetInputUnfocusEvent(
-   RGEvent &evt,
-   const string controlName)
+void RG_SetInputUnfocusEvent(RGEvent &evt,const string controlName)
 {
    evt.Type = RG_EVENT_INPUT_UNFOCUS;
    evt.ControlName = controlName;
@@ -80,7 +72,7 @@ void RG_SetInputUnfocusEvent(
 //====================================================
 bool RG_HasEvent(const RGEvent &evt)
 {
-   return(evt.Type != RG_EVENT_NONE);
+   return(evt.Type!=RG_EVENT_NONE);
 }
 
 //====================================================
@@ -89,6 +81,54 @@ bool RG_HasEvent(const RGEvent &evt)
 void RG_ResetEvent(RGEvent &evt)
 {
    RG_ClearEvent(evt);
+}
+
+//====================================================
+// Convert MT4 Chart Event -> RG Event
+//====================================================
+bool RG_ProcessChartEvent(
+   const int id,
+   const long &lparam,
+   const double &dparam,
+   const string &sparam,
+   RGEvent &evt)
+{
+   RG_ClearEvent(evt);
+
+   switch(id)
+   {
+      //------------------------------------------------
+      // Object Click
+      //------------------------------------------------
+      case CHARTEVENT_OBJECT_CLICK:
+      {
+         evt.Type        = RG_EVENT_BUTTON_CLICK;
+         evt.ControlName = sparam;
+         return(true);
+      }
+
+      //------------------------------------------------
+      // Object Edit Finished
+      //------------------------------------------------
+      case CHARTEVENT_OBJECT_ENDEDIT:
+      {
+         evt.Type        = RG_EVENT_INPUT_CHANGED;
+         evt.ControlName = sparam;
+         return(true);
+      }
+
+      //------------------------------------------------
+      // Mouse Down
+      //------------------------------------------------
+      case CHARTEVENT_CLICK:
+      {
+         evt.Type        = RG_EVENT_INPUT_UNFOCUS;
+         evt.ControlName = "";
+         return(true);
+      }
+   }
+
+   return(false);
 }
 
 #endif
