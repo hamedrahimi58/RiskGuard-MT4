@@ -1,16 +1,17 @@
-#ifndef __RG_LABEL_MQH__
-#define __RG_LABEL_MQH__
+#ifndef __RG_LABEL_V2_MQH__
+#define __RG_LABEL_V2_MQH__
 
 //====================================================
 // Create Label
 //====================================================
-bool RG_CreateLabel(
-   string name,
-   string text,
-   int x,
-   int y,
-   color textColor,
-   int fontSize)
+bool RG_CreateLabelV2(
+   const string name,
+   const string text,
+   const int x,
+   const int y,
+   const color textColor,
+   const int fontSize=10,
+   const string fontName="Arial")
 {
    if(ObjectFind(0,name)>=0)
       ObjectDelete(0,name);
@@ -18,16 +19,19 @@ bool RG_CreateLabel(
    if(!ObjectCreate(0,name,OBJ_LABEL,0,0,0))
       return(false);
 
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+
    ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
    ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
 
    ObjectSetString(0,name,OBJPROP_TEXT,text);
 
-   ObjectSetString(0,name,OBJPROP_FONT,"Arial");
+   ObjectSetString(0,name,OBJPROP_FONT,fontName);
    ObjectSetInteger(0,name,OBJPROP_FONTSIZE,fontSize);
 
    ObjectSetInteger(0,name,OBJPROP_COLOR,textColor);
 
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
    ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
    ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
@@ -38,7 +42,7 @@ bool RG_CreateLabel(
 //====================================================
 // Delete Label
 //====================================================
-void RG_DeleteLabel(string name)
+void RG_DeleteLabelV2(const string name)
 {
    if(ObjectFind(0,name)>=0)
       ObjectDelete(0,name);
@@ -47,12 +51,40 @@ void RG_DeleteLabel(string name)
 //====================================================
 // Set Label Text
 //====================================================
-void RG_SetLabelText(
-   string name,
-   string text)
+void RG_SetLabelTextV2(
+   const string name,
+   const string text)
 {
    if(ObjectFind(0,name)>=0)
       ObjectSetString(0,name,OBJPROP_TEXT,text);
+}
+
+//====================================================
+// Set Label Color
+//====================================================
+void RG_SetLabelColorV2(
+   const string name,
+   const color textColor)
+{
+   if(ObjectFind(0,name)<0)
+      return;
+
+   ObjectSetInteger(0,name,OBJPROP_COLOR,textColor);
+}
+
+//====================================================
+// Show / Hide
+//====================================================
+void RG_ShowLabelV2(const string name)
+{
+   if(ObjectFind(0,name)>=0)
+      ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+}
+
+void RG_HideLabelV2(const string name)
+{
+   if(ObjectFind(0,name)>=0)
+      ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
 }
 
 #endif
