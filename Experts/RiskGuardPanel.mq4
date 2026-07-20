@@ -54,6 +54,29 @@ void OnChartEvent(
    const double &dparam,
    const string &sparam)
 {
+   //--------------------------------------------------
+   // Edit Finished
+   //--------------------------------------------------
+   if(id==CHARTEVENT_OBJECT_ENDEDIT)
+   {
+      if(sparam==RG_PREFIX+"SL")
+      {
+         Print("SL Changed : ",RG_GetEditText(RG_PREFIX+"SL"));
+         return;
+      }
+
+      if(sparam==RG_PREFIX+"TP")
+      {
+         Print("TP Changed : ",RG_GetEditText(RG_PREFIX+"TP"));
+         return;
+      }
+
+      return;
+   }
+
+   //--------------------------------------------------
+   // Button Clicks
+   //--------------------------------------------------
    if(id!=CHARTEVENT_OBJECT_CLICK)
       return;
 
