@@ -7,6 +7,8 @@
 
 #include <RG_Settings.mqh>
 #include <RG_GUI.mqh>
+#include <GUI/RG_Events.mqh>
+#include <GUI/RG_EventHandler.mqh>
 #include <Trade/RG_Trade.mqh>
 
 //====================================================
@@ -54,6 +56,21 @@ void OnChartEvent(
    const double &dparam,
    const string &sparam)
 {
+   //--------------------------------------------------
+   // Convert MT4 Event -> RG Event
+   //--------------------------------------------------
+   RGEvent evt;
+
+   if(RG_ProcessChartEvent(
+      id,
+      lparam,
+      dparam,
+      sparam,
+      evt))
+   {
+      RG_HandleEvent(evt);
+   }
+
    //--------------------------------------------------
    // Edit Finished
    //--------------------------------------------------
