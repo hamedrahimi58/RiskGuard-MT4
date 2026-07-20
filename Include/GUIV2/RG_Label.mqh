@@ -59,4 +59,32 @@ void RG_SetLabelTextV2(
       ObjectSetString(0,name,OBJPROP_TEXT,text);
 }
 
+//====================================================
+// Set Label Color
+//====================================================
+void RG_SetLabelColorV2(
+   const string name,
+   const color textColor)
+{
+   if(ObjectFind(0,name)<0)
+      return;
+
+   ObjectSetInteger(0,name,OBJPROP_COLOR,textColor);
+}
+
+//====================================================
+// Show / Hide
+//====================================================
+void RG_ShowLabelV2(const string name)
+{
+   if(ObjectFind(0,name)>=0)
+      ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+}
+
+void RG_HideLabelV2(const string name)
+{
+   if(ObjectFind(0,name)>=0)
+      ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+}
+
 #endif
