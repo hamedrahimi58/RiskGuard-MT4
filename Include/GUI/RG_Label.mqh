@@ -1,5 +1,5 @@
-#ifndef __RG_LABEL_V2_MQH__
-#define __RG_LABEL_V2_MQH__
+#ifndef __RG_LABEL_MQH__
+#define __RG_LABEL_MQH__
 
 //====================================================
 // Create Label
