@@ -50,7 +50,7 @@ bool RG_CreateGUIV2(
    // Fixed Lot (Display Only)
    RG_CreateInputV2(
       RGV2_LOT_INPUT,
-      "0.10",
+      "",
       x+15,
       y+60,
       80,
@@ -62,7 +62,7 @@ bool RG_CreateGUIV2(
 }
 
 //--------------------------------------------------
-// Update Fixed Lot
+// Update Fixed Lot Display
 //--------------------------------------------------
 void RG_SetFixedLotDisplay(const double lot)
 {
