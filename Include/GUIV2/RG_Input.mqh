@@ -25,6 +25,8 @@ struct RGInput
    double Value;
    double MinValue;
    double MaxValue;
+
+   bool   ReadOnly;
 };
 
 //====================================================
@@ -36,15 +38,18 @@ void RG_InputCreate(
    const ENUM_RG_INPUT_TYPE type,
    const double value,
    const double minValue,
-   const double maxValue)
+   const double maxValue,
+   const bool readOnly=false)
 {
-   ctrl.Name     = name;
-   ctrl.Type     = type;
+   ctrl.Name      = name;
+   ctrl.Type      = type;
 
-   ctrl.Value    = value;
+   ctrl.Value     = value;
 
-   ctrl.MinValue = minValue;
-   ctrl.MaxValue = maxValue;
+   ctrl.MinValue  = minValue;
+   ctrl.MaxValue  = maxValue;
+
+   ctrl.ReadOnly  = readOnly;
 }
 
 //====================================================
@@ -54,6 +59,9 @@ bool RG_InputSetValue(
    RGInput &ctrl,
    const double value)
 {
+   if(ctrl.ReadOnly)
+      return(false);
+
    if(value < ctrl.MinValue)
       return(false);
 
@@ -68,10 +76,25 @@ bool RG_InputSetValue(
 //====================================================
 // Get Value
 //====================================================
-double RG_InputGetValue(
-   const RGInput &ctrl)
+double RG_InputGetValue(const RGInput &ctrl)
 {
    return(ctrl.Value);
+}
+
+//====================================================
+// Read Only
+//====================================================
+void RG_InputSetReadOnly(
+   RGInput &ctrl,
+   const bool state)
+{
+   ctrl.ReadOnly = state;
+}
+
+bool RG_InputIsReadOnly(
+   const RGInput &ctrl)
+{
+   return(ctrl.ReadOnly);
 }
 
 #endif
