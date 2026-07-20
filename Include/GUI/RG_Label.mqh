@@ -4,7 +4,7 @@
 //====================================================
 // Create Label
 //====================================================
-bool RG_CreateLabelV2(
+bool RG_CreateLabel(
    const string name,
    const string text,
    const int x,
@@ -42,7 +42,7 @@ bool RG_CreateLabelV2(
 //====================================================
 // Delete Label
 //====================================================
-void RG_DeleteLabelV2(const string name)
+void RG_DeleteLabel(const string name)
 {
    if(ObjectFind(0,name)>=0)
       ObjectDelete(0,name);
@@ -51,7 +51,7 @@ void RG_DeleteLabelV2(const string name)
 //====================================================
 // Set Label Text
 //====================================================
-void RG_SetLabelTextV2(
+void RG_SetLabelText(
    const string name,
    const string text)
 {
@@ -62,7 +62,7 @@ void RG_SetLabelTextV2(
 //====================================================
 // Set Label Color
 //====================================================
-void RG_SetLabelColorV2(
+void RG_SetLabelColor(
    const string name,
    const color textColor)
 {
@@ -75,13 +75,13 @@ void RG_SetLabelColorV2(
 //====================================================
 // Show / Hide
 //====================================================
-void RG_ShowLabelV2(const string name)
+void RG_ShowLabel(const string name)
 {
    if(ObjectFind(0,name)>=0)
       ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
 }
 
-void RG_HideLabelV2(const string name)
+void RG_HideLabel(const string name)
 {
    if(ObjectFind(0,name)>=0)
       ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
