@@ -47,6 +47,7 @@ bool RG_CreateGUIV2(
       clrLime,
       10);
 
+   // Fixed Lot (Display Only)
    RG_CreateInputV2(
       RGV2_LOT_INPUT,
       "0.10",
@@ -55,7 +56,21 @@ bool RG_CreateGUIV2(
       80,
       22);
 
+   ObjectSetInteger(0,RGV2_LOT_INPUT,OBJPROP_READONLY,true);
+
    return(true);
+}
+
+//--------------------------------------------------
+// Update Fixed Lot
+//--------------------------------------------------
+void RG_SetFixedLotDisplay(const double lot)
+{
+   ObjectSetString(
+      0,
+      RGV2_LOT_INPUT,
+      OBJPROP_TEXT,
+      DoubleToString(lot,2));
 }
 
 //--------------------------------------------------
