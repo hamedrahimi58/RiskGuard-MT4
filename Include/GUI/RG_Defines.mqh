@@ -1,8 +1,8 @@
-#ifndef __RG_GUI_DEFINES_V2_MQH__
-#define __RG_GUI_DEFINES_V2_MQH__
+#ifndef __RG_GUI_DEFINES_MQH__
+#define __RG_GUI_DEFINES_MQH__
 
 //====================================================
-// GUI V2 Constants
+// GUI Constants
 //====================================================
 
 #define RGV2_FONT_NAME        "Arial"
