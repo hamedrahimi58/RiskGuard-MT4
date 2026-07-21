@@ -69,7 +69,7 @@ int RG_SendBuyOrder()
       return(-1);
    }
 
-   if(UseStopLoss)
+   if(RGTradeConfig.UseStopLoss)
    {
       Sleep(500);
 
@@ -77,7 +77,7 @@ int RG_SendBuyOrder()
 
       if(OrderSelect(ticket,SELECT_BY_TICKET))
       {
-         double sl=OrderOpenPrice()-StopLoss*RG_Point();
+         double sl=OrderOpenPrice()-RGTradeConfig.StopLoss*RG_Point();
 
          sl=RG_CorrectBuySL(sl,OrderOpenPrice());
 
@@ -116,7 +116,7 @@ int RG_SendSellOrder()
       return(-1);
    }
 
-   if(UseStopLoss)
+   if(RGTradeConfig.UseStopLoss)
    {
       Sleep(500);
 
@@ -124,7 +124,7 @@ int RG_SendSellOrder()
 
       if(OrderSelect(ticket,SELECT_BY_TICKET))
       {
-         double sl=OrderOpenPrice()+StopLoss*RG_Point();
+         double sl=OrderOpenPrice()+RGTradeConfig.StopLoss*RG_Point();
 
          sl=RG_CorrectSellSL(sl,OrderOpenPrice());
 
