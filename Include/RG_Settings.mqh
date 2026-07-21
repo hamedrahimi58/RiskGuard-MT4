@@ -1,6 +1,8 @@
 #ifndef __RG_SETTINGS_MQH__
 #define __RG_SETTINGS_MQH__
 
+#include <Engine/RG_TradeSettings.mqh>
+
 //====================================================
 // Panel Position
 //====================================================
@@ -39,5 +41,18 @@ enum ENUM_RG_LOT_MODE
 };
 
 input ENUM_RG_LOT_MODE LotMode = LOT_FIXED;
+
+//====================================================
+// Initialize Trade Settings
+//====================================================
+void RG_InitTradeSettings()
+{
+   RGTradeConfig.FixedLot      = FixedLot;
+   RGTradeConfig.StopLoss      = StopLoss;
+   RGTradeConfig.TakeProfit    = TakeProfit;
+
+   RGTradeConfig.UseStopLoss   = UseStopLoss;
+   RGTradeConfig.UseTakeProfit = UseTakeProfit;
+}
 
 #endif
