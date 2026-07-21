@@ -3,6 +3,7 @@
 
 #include <RG_Settings.mqh>
 #include <Trade/RG_Broker.mqh>
+#include <Trade/RG_RiskEngine.mqh>
 #include <GUI/RG_Edit.mqh>
 #include <Core/RG_Defines.mqh>
 
@@ -12,34 +13,37 @@
 double RG_GetVolume()
 {
    //--------------------------------------------------
-   // Read Lot From GUI
+   // Fixed Lot
    //--------------------------------------------------
-   double lot = FixedLot;
-
-   string txt = RG_GetEditText(RG_PREFIX+"LOT");
-
-   if(StringLen(txt) > 0)
+   if(LotMode == LOT_FIXED)
    {
-      double guiLot = StrToDouble(txt);
+      double lot = FixedLot;
 
-      if(guiLot > 0)
-         lot = guiLot;
+      string txt = RG_GetEditText(RG_PREFIX+"LOT");
+
+      if(StringLen(txt) > 0)
+      {
+         double guiLot = StrToDouble(txt);
+
+         if(guiLot > 0)
+            lot = guiLot;
+      }
+
+      return(RG_NormalizeLot(lot));
    }
 
    //--------------------------------------------------
-   // Future Lot Modes
+   // Risk Lot
    //--------------------------------------------------
-   switch(LotMode)
+   if(LotMode == LOT_RISK)
    {
-      case LOT_FIXED:
-         break;
-
-      case LOT_RISK:
-         // Risk Engine will be implemented later.
-         break;
+      return(RG_CalculateRiskLot(StopLoss));
    }
 
-   return(RG_NormalizeLot(lot));
+   //--------------------------------------------------
+   // Fallback
+   //--------------------------------------------------
+   return(RG_NormalizeLot(FixedLot));
 }
 
 #endif
