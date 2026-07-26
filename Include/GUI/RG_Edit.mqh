@@ -14,62 +14,73 @@ bool RG_CreateEdit(
    color backColor,
    color textColor)
 {
-   if(ObjectFind(0,name)>=0)
-      ObjectDelete(0,name);
+   if(ObjectFind(name)>=0)
+      ObjectDelete(name);
 
-   if(!ObjectCreate(0,name,OBJ_EDIT,0,0,0))
+   ResetLastError();
+
+   if(!ObjectCreate(name,OBJ_EDIT,0,0,0))
+   {
+      Print("Create Edit Failed : ",name,
+            " Error=",GetLastError());
       return(false);
+   }
 
-   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
-   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+   ObjectSet(name,OBJPROP_XDISTANCE,x);
+   ObjectSet(name,OBJPROP_YDISTANCE,y);
 
-   ObjectSetInteger(0,name,OBJPROP_XSIZE,width);
-   ObjectSetInteger(0,name,OBJPROP_YSIZE,height);
+   ObjectSet(name,OBJPROP_XSIZE,width);
+   ObjectSet(name,OBJPROP_YSIZE,height);
 
-   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,backColor);
-   ObjectSetInteger(0,name,OBJPROP_COLOR,textColor);
-   ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,clrSilver);
+   ObjectSet(name,OBJPROP_BGCOLOR,backColor);
+   ObjectSet(name,OBJPROP_COLOR,textColor);
+   ObjectSet(name,OBJPROP_BORDER_COLOR,clrSilver);
 
-   ObjectSetString(0,name,OBJPROP_FONT,"Arial");
-   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,10);
+   ObjectSetText(
+      name,
+      text,
+      10,
+      "Arial",
+      textColor);
 
-   ObjectSetString(0,name,OBJPROP_TEXT,text);
+   ObjectSet(name,OBJPROP_BACK,false);
+   ObjectSet(name,OBJPROP_HIDDEN,false);
+   ObjectSet(name,OBJPROP_SELECTABLE,true);
+   ObjectSet(name,OBJPROP_SELECTED,false);
 
-   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,true);
-   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
-   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+   Print("Edit Created : ",name);
 
    return(true);
 }
 
 //====================================================
-// Delete Edit Box
+// Delete Edit
 //====================================================
 void RG_DeleteEdit(string name)
 {
-   if(ObjectFind(0,name)>=0)
-      ObjectDelete(0,name);
+   if(ObjectFind(name)>=0)
+      ObjectDelete(name);
 }
 
 //====================================================
-// Get Edit Text
+// Get Text
 //====================================================
 string RG_GetEditText(string name)
 {
-   if(ObjectFind(0,name)<0)
+   if(ObjectFind(name)<0)
       return("");
 
    return(ObjectGetString(0,name,OBJPROP_TEXT));
 }
 
 //====================================================
-// Set Edit Text
+// Set Text
 //====================================================
 void RG_SetEditText(
    string name,
    string text)
 {
-   if(ObjectFind(0,name)>=0)
+   if(ObjectFind(name)>=0)
       ObjectSetString(0,name,OBJPROP_TEXT,text);
 }
 

@@ -15,6 +15,12 @@
 
 int OnInit()
 {
+   // Enable Chart Events
+   ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,true);
+   ChartSetInteger(0,CHART_EVENT_OBJECT_CREATE,true);
+   ChartSetInteger(0,CHART_EVENT_OBJECT_DELETE,true);
+  
+
    if(!RG_CreatePanel())
       return(INIT_FAILED);
 
@@ -23,6 +29,8 @@ int OnInit()
    RG_SetLabelText(
       RG_PREFIX+"STATUS",
       "Status : READY");
+
+   ChartRedraw();
 
    return(INIT_SUCCEEDED);
 }
@@ -54,6 +62,11 @@ void OnChartEvent(
    const double &dparam,
    const string &sparam)
 {
+   
+
+   //--------------------------------------------------
+   // Buttons
+   //--------------------------------------------------
    if(id==CHARTEVENT_OBJECT_CLICK)
    {
       //--------------------------------------------------
