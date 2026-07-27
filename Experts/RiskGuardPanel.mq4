@@ -15,6 +15,12 @@
 
 int OnInit()
 {
+   // Enable Chart Events
+   ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,true);
+   ChartSetInteger(0,CHART_EVENT_OBJECT_CREATE,true);
+   ChartSetInteger(0,CHART_EVENT_OBJECT_DELETE,true);
+  
+
    if(!RG_CreatePanel())
       return(INIT_FAILED);
 
@@ -23,6 +29,8 @@ int OnInit()
    RG_SetLabelText(
       RG_PREFIX+"STATUS",
       "Status : READY");
+
+   ChartRedraw();
 
    return(INIT_SUCCEEDED);
 }
@@ -54,68 +62,61 @@ void OnChartEvent(
    const double &dparam,
    const string &sparam)
 {
-   if(id!=CHARTEVENT_OBJECT_CLICK)
-      return;
+   
 
    //--------------------------------------------------
-   // BUY
+   // Buttons
    //--------------------------------------------------
-   if(sparam==RG_PREFIX+"BUY")
+   if(id==CHARTEVENT_OBJECT_CLICK)
    {
-      RG_SetLabelText(
-         RG_PREFIX+"STATUS",
-         "Status : Sending BUY...");
-
-      Print("BUY Button Clicked");
-
-      if(RG_Buy())
+      //--------------------------------------------------
+      // BUY
+      //--------------------------------------------------
+      if(sparam==RG_PREFIX+"BUY")
       {
          RG_SetLabelText(
             RG_PREFIX+"STATUS",
-            "Status : BUY Opened");
+            "Status : Sending BUY...");
 
-         Print("BUY Success");
+         if(RG_Buy())
+         {
+            RG_SetLabelText(
+               RG_PREFIX+"STATUS",
+               "Status : BUY Opened");
+         }
+         else
+         {
+            RG_SetLabelText(
+               RG_PREFIX+"STATUS",
+               "Status : BUY Failed");
+         }
+
+         return;
       }
-      else
+
+      //--------------------------------------------------
+      // SELL
+      //--------------------------------------------------
+      if(sparam==RG_PREFIX+"SELL")
       {
          RG_SetLabelText(
             RG_PREFIX+"STATUS",
-            "Status : BUY Failed");
+            "Status : Sending SELL...");
 
-         Print("BUY Failed");
+         if(RG_Sell())
+         {
+            RG_SetLabelText(
+               RG_PREFIX+"STATUS",
+               "Status : SELL Opened");
+         }
+         else
+         {
+            RG_SetLabelText(
+               RG_PREFIX+"STATUS",
+               "Status : SELL Failed");
+         }
+
+         return;
       }
-
-      return;
-   }
-
-   //--------------------------------------------------
-   // SELL
-   //--------------------------------------------------
-   if(sparam==RG_PREFIX+"SELL")
-   {
-      RG_SetLabelText(
-         RG_PREFIX+"STATUS",
-         "Status : Sending SELL...");
-
-      Print("SELL Button Clicked");
-
-      if(RG_Sell())
-      {
-         RG_SetLabelText(
-            RG_PREFIX+"STATUS",
-            "Status : SELL Opened");
-
-         Print("SELL Success");
-      }
-      else
-      {
-         RG_SetLabelText(
-            RG_PREFIX+"STATUS",
-            "Status : SELL Failed");
-
-         Print("SELL Failed");
-      }
-
-      return;
    }
 }
