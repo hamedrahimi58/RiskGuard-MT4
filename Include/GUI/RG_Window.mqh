@@ -4,7 +4,7 @@
 //====================================================
 // RiskGuard MT4
 // GUI v3
-// RG-017-001
+// RG-017-012
 //====================================================
 
 class CRGWindow
@@ -22,11 +22,9 @@ private:
    color m_backColor;
    color m_borderColor;
 
+
 public:
 
-   //--------------------------------------------------
-   // Constructor
-   //--------------------------------------------------
 
    CRGWindow()
    {
@@ -42,9 +40,7 @@ public:
       m_borderColor=clrDimGray;
    }
 
-   //--------------------------------------------------
-   // Create
-   //--------------------------------------------------
+
 
    bool Create(
       string name,
@@ -55,6 +51,7 @@ public:
       color backColor=clrBlack,
       color borderColor=clrDimGray)
    {
+
       m_name=name;
 
       m_x=x;
@@ -66,11 +63,17 @@ public:
       m_backColor=backColor;
       m_borderColor=borderColor;
 
+
+
       if(ObjectFind(0,m_name)>=0)
          ObjectDelete(0,m_name);
 
+
+
       if(!ObjectCreate(0,m_name,OBJ_RECTANGLE_LABEL,0,0,0))
          return(false);
+
+
 
       ObjectSetInteger(0,m_name,OBJPROP_XDISTANCE,m_x);
       ObjectSetInteger(0,m_name,OBJPROP_YDISTANCE,m_y);
@@ -78,21 +81,32 @@ public:
       ObjectSetInteger(0,m_name,OBJPROP_XSIZE,m_width);
       ObjectSetInteger(0,m_name,OBJPROP_YSIZE,m_height);
 
+
+
       ObjectSetInteger(0,m_name,OBJPROP_BGCOLOR,m_backColor);
       ObjectSetInteger(0,m_name,OBJPROP_BORDER_COLOR,m_borderColor);
 
-      ObjectSetInteger(0,m_name,OBJPROP_BACK,false);
+
+
+      // Background layer
+      ObjectSetInteger(0,m_name,OBJPROP_BACK,true);
+
+      ObjectSetInteger(0,m_name,OBJPROP_ZORDER,0);
+
+
+
       ObjectSetInteger(0,m_name,OBJPROP_HIDDEN,true);
 
       ObjectSetInteger(0,m_name,OBJPROP_SELECTABLE,false);
+
       ObjectSetInteger(0,m_name,OBJPROP_SELECTED,false);
+
+
 
       return(true);
    }
 
-   //--------------------------------------------------
-   // Destroy
-   //--------------------------------------------------
+
 
    void Destroy()
    {
@@ -100,9 +114,7 @@ public:
          ObjectDelete(0,m_name);
    }
 
-   //--------------------------------------------------
-   // Show
-   //--------------------------------------------------
+
 
    void Show()
    {
@@ -110,9 +122,7 @@ public:
          ObjectSetInteger(0,m_name,OBJPROP_HIDDEN,false);
    }
 
-   //--------------------------------------------------
-   // Hide
-   //--------------------------------------------------
+
 
    void Hide()
    {
@@ -120,9 +130,7 @@ public:
          ObjectSetInteger(0,m_name,OBJPROP_HIDDEN,true);
    }
 
-   //--------------------------------------------------
-   // Name
-   //--------------------------------------------------
+
 
    string Name()
    {
@@ -130,5 +138,6 @@ public:
    }
 
 };
+
 
 #endif
