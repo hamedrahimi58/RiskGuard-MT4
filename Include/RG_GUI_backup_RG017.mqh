@@ -2,61 +2,35 @@
 #define __RG_GUI_MQH__
 
 #include <RG_Settings.mqh>
+
 #include <Core/RG_Defines.mqh>
 
-#include <GUI/RG_Window.mqh>
+#include <GUI/RG_Panel.mqh>
 #include <GUI/RG_Label.mqh>
-#include <GUI/RG_Status.mqh>
 #include <GUI/RG_Button.mqh>
 #include <GUI/RG_Edit.mqh>
-
-
-//====================================================
-// GUI Objects
-//====================================================
-
-CRGWindow RG_MainWindow;
-
-CRGLabel  RG_Title;
-CRGStatus RG_Status;
-
-CRGLabel  RG_LotLabel;
-CRGLabel  RG_SLLabel;
-CRGLabel  RG_TPLabel;
-
-CRGButton RG_BuyButton;
-CRGButton RG_SellButton;
-
 
 //====================================================
 // Create Main GUI
 //====================================================
-
 bool RG_CreatePanel()
 {
-
    //--------------------------------------------------
-   // Window
+   // Panel
    //--------------------------------------------------
-
-   if(!RG_MainWindow.Create(
+   if(!RG_CreatePanelObject(
       RG_PANEL_NAME,
       PanelX,
       PanelY,
       PanelWidth,
       PanelHeight,
       clrBlack))
-   {
       return(false);
-   }
-
-
 
    //--------------------------------------------------
    // Title
    //--------------------------------------------------
-
-   RG_Title.Create(
+   RG_CreateLabel(
       RG_PREFIX+"TITLE",
       RG_NAME+" v"+RG_VERSION,
       PanelX+15,
@@ -64,13 +38,10 @@ bool RG_CreatePanel()
       clrWhite,
       11);
 
-
-
    //--------------------------------------------------
    // Status
    //--------------------------------------------------
-
-   RG_Status.Create(
+   RG_CreateLabel(
       RG_PREFIX+"STATUS",
       "Status : READY",
       PanelX+15,
@@ -78,20 +49,16 @@ bool RG_CreatePanel()
       clrLime,
       10);
 
-
-
    //--------------------------------------------------
    // Lot
    //--------------------------------------------------
-
-   RG_LotLabel.Create(
+   RG_CreateLabel(
       RG_PREFIX+"LOT_LBL",
       "Lot",
       PanelX+15,
       PanelY+70,
       clrWhite,
       10);
-
 
    RG_CreateEdit(
       RG_PREFIX+"LOT",
@@ -103,20 +70,16 @@ bool RG_CreatePanel()
       clrWhite,
       clrBlack);
 
-
-
    //--------------------------------------------------
    // SL
    //--------------------------------------------------
-
-   RG_SLLabel.Create(
+   RG_CreateLabel(
       RG_PREFIX+"SL_LBL",
       "SL",
       PanelX+15,
       PanelY+100,
       clrWhite,
       10);
-
 
    RG_CreateEdit(
       RG_PREFIX+"SL",
@@ -128,20 +91,16 @@ bool RG_CreatePanel()
       clrWhite,
       clrBlack);
 
-
-
    //--------------------------------------------------
    // TP
    //--------------------------------------------------
-
-   RG_TPLabel.Create(
+   RG_CreateLabel(
       RG_PREFIX+"TP_LBL",
       "TP",
       PanelX+15,
       PanelY+130,
       clrWhite,
       10);
-
 
    RG_CreateEdit(
       RG_PREFIX+"TP",
@@ -153,13 +112,10 @@ bool RG_CreatePanel()
       clrWhite,
       clrBlack);
 
-
-
    //--------------------------------------------------
    // BUY
    //--------------------------------------------------
-
-   RG_BuyButton.Create(
+   RG_CreateButton(
       RG_PREFIX+"BUY",
       "BUY",
       PanelX+180,
@@ -169,13 +125,10 @@ bool RG_CreatePanel()
       clrLime,
       clrBlack);
 
-
-
    //--------------------------------------------------
    // SELL
    //--------------------------------------------------
-
-   RG_SellButton.Create(
+   RG_CreateButton(
       RG_PREFIX+"SELL",
       "SELL",
       PanelX+180,
@@ -185,66 +138,29 @@ bool RG_CreatePanel()
       clrRed,
       clrWhite);
 
-
    return(true);
 }
-
-
-
-//====================================================
-// Update Status
-//====================================================
-
-void RG_SetLabelText(
-   string name,
-   string text)
-{
-
-   if(name==RG_PREFIX+"STATUS")
-   {
-      RG_Status.SetText(text);
-   }
-
-}
-
-
 
 //====================================================
 // Delete GUI
 //====================================================
-
 void RG_DeletePanel()
 {
-
-   RG_BuyButton.Destroy();
-
-   RG_SellButton.Destroy();
-
+   RG_DeleteButton(RG_PREFIX+"BUY");
+   RG_DeleteButton(RG_PREFIX+"SELL");
 
    RG_DeleteEdit(RG_PREFIX+"LOT");
-
    RG_DeleteEdit(RG_PREFIX+"SL");
-
    RG_DeleteEdit(RG_PREFIX+"TP");
 
+   RG_DeleteLabel(RG_PREFIX+"LOT_LBL");
+   RG_DeleteLabel(RG_PREFIX+"SL_LBL");
+   RG_DeleteLabel(RG_PREFIX+"TP_LBL");
 
+   RG_DeleteLabel(RG_PREFIX+"TITLE");
+   RG_DeleteLabel(RG_PREFIX+"STATUS");
 
-   RG_Title.Destroy();
-
-   RG_Status.Destroy();
-
-
-   RG_LotLabel.Destroy();
-
-   RG_SLLabel.Destroy();
-
-   RG_TPLabel.Destroy();
-
-
-
-   RG_MainWindow.Destroy();
-
+   RG_DeletePanelObject(RG_PANEL_NAME);
 }
-
 
 #endif
