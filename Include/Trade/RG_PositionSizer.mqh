@@ -6,17 +6,41 @@
 #include <GUI/RG_Edit.mqh>
 #include <Core/RG_Defines.mqh>
 
+
+//====================================================
+// Check Max Lot Limit
+//====================================================
+bool RG_CheckVolumeLimit(double lot)
+{
+   if(lot > MaxLot)
+   {
+      Print("RiskGuard: Lot limit exceeded. Requested: ",
+            DoubleToString(lot,2),
+            " Max: ",
+            DoubleToString(MaxLot,2));
+
+      return(false);
+   }
+
+   return(true);
+}
+
+
+
 //====================================================
 // Return Trading Volume
 //====================================================
 double RG_GetVolume()
 {
+
    //--------------------------------------------------
    // Read Lot From GUI
    //--------------------------------------------------
    double lot = FixedLot;
 
+
    string txt = RG_GetEditText(RG_PREFIX+"LOT");
+
 
    if(StringLen(txt) > 0)
    {
@@ -26,20 +50,32 @@ double RG_GetVolume()
          lot = guiLot;
    }
 
+
+
    //--------------------------------------------------
-   // Future Lot Modes
+   // Lot Modes
    //--------------------------------------------------
    switch(LotMode)
    {
       case LOT_FIXED:
          break;
 
+
       case LOT_RISK:
-         // Risk Engine will be implemented later.
+         // Risk Engine later
          break;
    }
 
-   return(RG_NormalizeLot(lot));
+
+
+   //--------------------------------------------------
+   // Normalize
+   //--------------------------------------------------
+   lot = RG_NormalizeLot(lot);
+
+
+   return(lot);
 }
+
 
 #endif

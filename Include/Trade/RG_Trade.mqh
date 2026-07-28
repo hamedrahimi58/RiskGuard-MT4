@@ -5,6 +5,42 @@
 #include <Trade/RG_PositionSizer.mqh>
 #include <Trade/RG_Broker.mqh>
 
+
+//====================================================
+// Count Open Positions
+//====================================================
+int RG_CountOpenPositions()
+{
+   int count=0;
+
+   for(int i=OrdersTotal()-1;i>=0;i--)
+   {
+      if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES))
+      {
+         if(OrderSymbol()==Symbol())
+            count++;
+      }
+   }
+
+   return(count);
+}
+
+
+//====================================================
+// Check Position Limit
+//====================================================
+bool RG_CheckPositionLimit()
+{
+   if(RG_CountOpenPositions() >= MaxOpenPositions)
+   {
+      Print("RiskGuard: Max open positions reached");
+      return(false);
+   }
+
+   return(true);
+}
+
+
 //====================================================
 // Modify Order
 //====================================================
@@ -32,6 +68,7 @@ bool RG_ModifyOrder(
       0,
       clrNONE);
 
+
    if(!result)
    {
       Print("Modify Error : ",GetLastError());
@@ -41,14 +78,27 @@ bool RG_ModifyOrder(
    return(true);
 }
 
+
 //====================================================
 // Send BUY
 //====================================================
 int RG_SendBuyOrder()
 {
+
+   if(!RG_CheckPositionLimit())
+      return(-1);
+
+
    RefreshRates();
 
+
    double lot=RG_GetVolume();
+
+
+   if(!RG_CheckVolumeLimit(lot))
+      return(-1);
+
+
 
    int ticket=OrderSend(
       Symbol(),
@@ -63,11 +113,15 @@ int RG_SendBuyOrder()
       0,
       clrLime);
 
+
+
    if(ticket<0)
    {
       Print("BUY Error : ",GetLastError());
       return(-1);
    }
+
+
 
    if(UseStopLoss)
    {
@@ -85,17 +139,32 @@ int RG_SendBuyOrder()
       }
    }
 
+
    return(ticket);
 }
+
+
 
 //====================================================
 // Send SELL
 //====================================================
 int RG_SendSellOrder()
 {
+
+   if(!RG_CheckPositionLimit())
+      return(-1);
+
+
    RefreshRates();
 
+
    double lot=RG_GetVolume();
+
+
+   if(!RG_CheckVolumeLimit(lot))
+      return(-1);
+
+
 
    int ticket=OrderSend(
       Symbol(),
@@ -110,11 +179,15 @@ int RG_SendSellOrder()
       0,
       clrRed);
 
+
+
    if(ticket<0)
    {
       Print("SELL Error : ",GetLastError());
       return(-1);
    }
+
+
 
    if(UseStopLoss)
    {
@@ -132,8 +205,11 @@ int RG_SendSellOrder()
       }
    }
 
+
    return(ticket);
 }
+
+
 
 //====================================================
 // BUY
@@ -143,6 +219,7 @@ bool RG_Buy()
    return(RG_SendBuyOrder()>0);
 }
 
+
 //====================================================
 // SELL
 //====================================================
@@ -150,5 +227,6 @@ bool RG_Sell()
 {
    return(RG_SendSellOrder()>0);
 }
+
 
 #endif
