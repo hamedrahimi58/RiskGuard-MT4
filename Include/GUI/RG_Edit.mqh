@@ -20,6 +20,8 @@ bool RG_CreateEdit(
    if(!ObjectCreate(0,name,OBJ_EDIT,0,0,0))
       return(false);
 
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+
    ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
    ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
 
@@ -35,9 +37,26 @@ bool RG_CreateEdit(
 
    ObjectSetString(0,name,OBJPROP_TEXT,text);
 
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+
+   //==================================================
+   // IMPORTANT
+   //==================================================
    ObjectSetInteger(0,name,OBJPROP_SELECTABLE,true);
    ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
-   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+
+   // Edit must NOT be hidden
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+
+   // Edit must NOT be read only
+   #ifdef OBJPROP_READONLY
+      ObjectSetInteger(0,name,OBJPROP_READONLY,false);
+   #endif
+
+   // Keep object above panel
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,100);
+
+   ChartRedraw();
 
    return(true);
 }
