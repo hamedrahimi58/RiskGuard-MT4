@@ -6,9 +6,6 @@
 #include <Trade/RG_Broker.mqh>
 
 
-//====================================================
-// Count Open Positions
-//====================================================
 int RG_CountOpenPositions()
 {
    int count=0;
@@ -26,9 +23,7 @@ int RG_CountOpenPositions()
 }
 
 
-//====================================================
-// Check Position Limit
-//====================================================
+
 bool RG_CheckPositionLimit()
 {
    if(RG_CountOpenPositions() >= MaxOpenPositions)
@@ -41,9 +36,7 @@ bool RG_CheckPositionLimit()
 }
 
 
-//====================================================
-// Modify Order
-//====================================================
+
 bool RG_ModifyOrder(
    const int ticket,
    const double sl,
@@ -52,13 +45,10 @@ bool RG_ModifyOrder(
    if(ticket<=0)
       return(false);
 
-   if(!OrderSelect(ticket,SELECT_BY_TICKET))
-   {
-      Print("OrderSelect Error : ",GetLastError());
-      return(false);
-   }
 
-   RefreshRates();
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
+      return(false);
+
 
    bool result=OrderModify(
       OrderTicket(),
@@ -75,12 +65,14 @@ bool RG_ModifyOrder(
       return(false);
    }
 
+
    return(true);
 }
 
 
+
 //====================================================
-// Send BUY
+// BUY
 //====================================================
 int RG_SendBuyOrder()
 {
@@ -116,27 +108,36 @@ int RG_SendBuyOrder()
 
 
    if(ticket<0)
-   {
-      Print("BUY Error : ",GetLastError());
       return(-1);
-   }
 
 
 
-   if(UseStopLoss)
+   Sleep(500);
+
+
+   if(OrderSelect(ticket,SELECT_BY_TICKET))
    {
-      Sleep(500);
 
-      RefreshRates();
+      double sl=0;
+      double tp=0;
 
-      if(OrderSelect(ticket,SELECT_BY_TICKET))
+
+      if(UseStopLoss)
       {
-         double sl=OrderOpenPrice()-StopLoss*RG_Point();
-
+         sl=OrderOpenPrice()-StopLoss*RG_Point();
          sl=RG_CorrectBuySL(sl,OrderOpenPrice());
-
-         RG_ModifyOrder(ticket,sl,0);
       }
+
+
+      if(UseTakeProfit)
+      {
+         tp=OrderOpenPrice()+TakeProfit*RG_Point();
+      }
+
+
+      if(sl>0 || tp>0)
+         RG_ModifyOrder(ticket,sl,tp);
+
    }
 
 
@@ -146,7 +147,7 @@ int RG_SendBuyOrder()
 
 
 //====================================================
-// Send SELL
+// SELL
 //====================================================
 int RG_SendSellOrder()
 {
@@ -182,27 +183,37 @@ int RG_SendSellOrder()
 
 
    if(ticket<0)
-   {
-      Print("SELL Error : ",GetLastError());
       return(-1);
-   }
 
 
 
-   if(UseStopLoss)
+   Sleep(500);
+
+
+
+   if(OrderSelect(ticket,SELECT_BY_TICKET))
    {
-      Sleep(500);
 
-      RefreshRates();
+      double sl=0;
+      double tp=0;
 
-      if(OrderSelect(ticket,SELECT_BY_TICKET))
+
+      if(UseStopLoss)
       {
-         double sl=OrderOpenPrice()+StopLoss*RG_Point();
-
+         sl=OrderOpenPrice()+StopLoss*RG_Point();
          sl=RG_CorrectSellSL(sl,OrderOpenPrice());
-
-         RG_ModifyOrder(ticket,sl,0);
       }
+
+
+      if(UseTakeProfit)
+      {
+         tp=OrderOpenPrice()-TakeProfit*RG_Point();
+      }
+
+
+      if(sl>0 || tp>0)
+         RG_ModifyOrder(ticket,sl,tp);
+
    }
 
 
@@ -211,18 +222,13 @@ int RG_SendSellOrder()
 
 
 
-//====================================================
-// BUY
-//====================================================
 bool RG_Buy()
 {
    return(RG_SendBuyOrder()>0);
 }
 
 
-//====================================================
-// SELL
-//====================================================
+
 bool RG_Sell()
 {
    return(RG_SendSellOrder()>0);
