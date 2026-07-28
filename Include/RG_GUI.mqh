@@ -2,7 +2,6 @@
 #define __RG_GUI_MQH__
 
 #include <RG_Settings.mqh>
-
 #include <Core/RG_Defines.mqh>
 
 #include <GUI/RG_Panel.mqh>
@@ -10,14 +9,14 @@
 #include <GUI/RG_Button.mqh>
 #include <GUI/RG_Edit.mqh>
 
+
 //====================================================
 // Create Main GUI
 //====================================================
+
 bool RG_CreatePanel()
 {
-   //--------------------------------------------------
-   // Panel
-   //--------------------------------------------------
+
    if(!RG_CreatePanelObject(
       RG_PANEL_NAME,
       PanelX,
@@ -25,11 +24,14 @@ bool RG_CreatePanel()
       PanelWidth,
       PanelHeight,
       clrBlack))
+   {
       return(false);
+   }
 
-   //--------------------------------------------------
+
+
    // Title
-   //--------------------------------------------------
+
    RG_CreateLabel(
       RG_PREFIX+"TITLE",
       RG_NAME+" v"+RG_VERSION,
@@ -38,9 +40,10 @@ bool RG_CreatePanel()
       clrWhite,
       11);
 
-   //--------------------------------------------------
+
+
    // Status
-   //--------------------------------------------------
+
    RG_CreateLabel(
       RG_PREFIX+"STATUS",
       "Status : READY",
@@ -49,9 +52,10 @@ bool RG_CreatePanel()
       clrLime,
       10);
 
-   //--------------------------------------------------
+
+
    // Lot
-   //--------------------------------------------------
+
    RG_CreateLabel(
       RG_PREFIX+"LOT_LBL",
       "Lot",
@@ -59,6 +63,7 @@ bool RG_CreatePanel()
       PanelY+70,
       clrWhite,
       10);
+
 
    RG_CreateEdit(
       RG_PREFIX+"LOT",
@@ -70,9 +75,10 @@ bool RG_CreatePanel()
       clrWhite,
       clrBlack);
 
-   //--------------------------------------------------
+
+
    // SL
-   //--------------------------------------------------
+
    RG_CreateLabel(
       RG_PREFIX+"SL_LBL",
       "SL",
@@ -80,6 +86,7 @@ bool RG_CreatePanel()
       PanelY+100,
       clrWhite,
       10);
+
 
    RG_CreateEdit(
       RG_PREFIX+"SL",
@@ -91,9 +98,10 @@ bool RG_CreatePanel()
       clrWhite,
       clrBlack);
 
-   //--------------------------------------------------
+
+
    // TP
-   //--------------------------------------------------
+
    RG_CreateLabel(
       RG_PREFIX+"TP_LBL",
       "TP",
@@ -101,6 +109,7 @@ bool RG_CreatePanel()
       PanelY+130,
       clrWhite,
       10);
+
 
    RG_CreateEdit(
       RG_PREFIX+"TP",
@@ -112,9 +121,10 @@ bool RG_CreatePanel()
       clrWhite,
       clrBlack);
 
-   //--------------------------------------------------
+
+
    // BUY
-   //--------------------------------------------------
+
    RG_CreateButton(
       RG_PREFIX+"BUY",
       "BUY",
@@ -125,9 +135,10 @@ bool RG_CreatePanel()
       clrLime,
       clrBlack);
 
-   //--------------------------------------------------
+
+
    // SELL
-   //--------------------------------------------------
+
    RG_CreateButton(
       RG_PREFIX+"SELL",
       "SELL",
@@ -138,29 +149,62 @@ bool RG_CreatePanel()
       clrRed,
       clrWhite);
 
+
+
+   // CLOSE ALL
+
+   RG_CreateButton(
+      RG_PREFIX+"CLOSE_ALL",
+      "CLOSE ALL",
+      PanelX+180,
+      PanelY+155,
+      110,
+      35,
+      clrOrange,
+      clrBlack);
+
+
+
    return(true);
 }
+
+
 
 //====================================================
 // Delete GUI
 //====================================================
+
 void RG_DeletePanel()
 {
+
    RG_DeleteButton(RG_PREFIX+"BUY");
+
    RG_DeleteButton(RG_PREFIX+"SELL");
 
+   RG_DeleteButton(RG_PREFIX+"CLOSE_ALL");
+
+
    RG_DeleteEdit(RG_PREFIX+"LOT");
+
    RG_DeleteEdit(RG_PREFIX+"SL");
+
    RG_DeleteEdit(RG_PREFIX+"TP");
 
-   RG_DeleteLabel(RG_PREFIX+"LOT_LBL");
-   RG_DeleteLabel(RG_PREFIX+"SL_LBL");
-   RG_DeleteLabel(RG_PREFIX+"TP_LBL");
 
    RG_DeleteLabel(RG_PREFIX+"TITLE");
+
    RG_DeleteLabel(RG_PREFIX+"STATUS");
 
+   RG_DeleteLabel(RG_PREFIX+"LOT_LBL");
+
+   RG_DeleteLabel(RG_PREFIX+"SL_LBL");
+
+   RG_DeleteLabel(RG_PREFIX+"TP_LBL");
+
+
    RG_DeletePanelObject(RG_PANEL_NAME);
+
 }
+
 
 #endif
