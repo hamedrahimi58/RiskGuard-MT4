@@ -1,0 +1,78 @@
+#ifndef __RG_ACTIONBUTTONS_MQH__
+#define __RG_ACTIONBUTTONS_MQH__
+
+#include <Core/RG_Defines.mqh>
+#include <GUI/RG_Button.mqh>
+#include <GUI/RG_Theme.mqh>
+
+//====================================================
+// Create Buttons
+//====================================================
+
+bool RG_CreateActionButtons(
+   int panelX,
+   int panelY)
+{
+
+   //--------------------------------------------------
+   // BUY
+   //--------------------------------------------------
+
+   RG_CreateButton(
+      RG_PREFIX+"BUY",
+      "BUY",
+      panelX + 180,
+      panelY + 65,
+      RG_BUTTON_WIDTH,
+      RG_BUTTON_HEIGHT,
+      RG_COLOR_BUY,
+      clrBlack);
+
+   //--------------------------------------------------
+   // SELL
+   //--------------------------------------------------
+
+   RG_CreateButton(
+      RG_PREFIX+"SELL",
+      "SELL",
+      panelX + 180,
+      panelY + 110,
+      RG_BUTTON_WIDTH,
+      RG_BUTTON_HEIGHT,
+      RG_COLOR_SELL,
+      clrWhite);
+
+   //--------------------------------------------------
+   // CLOSE ALL
+   //--------------------------------------------------
+
+   RG_CreateButton(
+      RG_PREFIX+"CLOSE_ALL",
+      "CLOSE ALL",
+      panelX + 180,
+      panelY + 155,
+      RG_BUTTON_WIDTH,
+      RG_BUTTON_HEIGHT,
+      RG_COLOR_CLOSE,
+      clrBlack);
+
+   return(true);
+
+}
+
+//====================================================
+// Delete Buttons
+//====================================================
+
+void RG_DeleteActionButtons()
+{
+
+   RG_DeleteButton(RG_PREFIX+"BUY");
+
+   RG_DeleteButton(RG_PREFIX+"SELL");
+
+   RG_DeleteButton(RG_PREFIX+"CLOSE_ALL");
+
+}
+
+#endif
