@@ -8,7 +8,11 @@
 #include <GUI/RG_Label.mqh>
 #include <GUI/RG_Button.mqh>
 #include <GUI/RG_Edit.mqh>
-
+#include <GUI/RG_Header.mqh>
+#include <GUI/RG_StatusBar.mqh>
+#include <GUI/RG_InputArea.mqh>
+#include <GUI/RG_ActionButtons.mqh>
+#include <GUI/RG_Footer.mqh>
 
 //====================================================
 // Create Main GUI
@@ -34,146 +38,30 @@ bool RG_CreatePanel()
 
 
    //--------------------------------------------------
-   // TITLE
-   //--------------------------------------------------
-   RG_CreateLabel(
-      RG_PREFIX+"TITLE",
-      RG_NAME+" v"+RG_VERSION,
-      PanelX+15,
-      PanelY+12,
-      clrWhite,
-      10);
+// Header
+//--------------------------------------------------
+RG_CreateHeader(
+   PanelX,
+   PanelY);
 
+//--------------------------------------------------
+// Status
+//--------------------------------------------------
+RG_CreateStatusBar(
+   PanelX,
+   PanelY);
 
+RG_CreateInputArea(
+   PanelX,
+   PanelY);
 
-   //--------------------------------------------------
-   // STATUS
-   //--------------------------------------------------
-   RG_CreateLabel(
-      RG_PREFIX+"STATUS",
-      "Status : READY",
-      PanelX+15,
-      PanelY+34,
-      clrLime,
-      9);
+RG_CreateActionButtons(
+   PanelX,
+   PanelY);
 
-
-
-   //--------------------------------------------------
-   // LOT
-   //--------------------------------------------------
-   RG_CreateLabel(
-      RG_PREFIX+"LOT_LBL",
-      "Lot",
-      PanelX+15,
-      PanelY+69,
-      clrWhite,
-      10);
-
-
-   RG_CreateEdit(
-      RG_PREFIX+"LOT",
-      DoubleToString(FixedLot,2),
-      PanelX+70,
-      PanelY+67,
-      90,
-      20,
-      clrWhite,
-      clrBlack);
-
-
-
-   //--------------------------------------------------
-   // SL
-   //--------------------------------------------------
-   RG_CreateLabel(
-      RG_PREFIX+"SL_LBL",
-      "SL",
-      PanelX+15,
-      PanelY+105,
-      clrWhite,
-      10);
-
-
-   RG_CreateEdit(
-      RG_PREFIX+"SL",
-      IntegerToString(StopLoss),
-      PanelX+70,
-      PanelY+97,
-      90,
-      20,
-      clrWhite,
-      clrBlack);
-
-
-
-   //--------------------------------------------------
-   // TP
-   //--------------------------------------------------
-   RG_CreateLabel(
-      RG_PREFIX+"TP_LBL",
-      "TP",
-      PanelX+15,
-      PanelY+141,
-      clrWhite,
-      10);
-
-
-   RG_CreateEdit(
-      RG_PREFIX+"TP",
-      IntegerToString(TakeProfit),
-      PanelX+70,
-      PanelY+127,
-      90,
-      20,
-      clrWhite,
-      clrBlack);
-
-
-
-   //--------------------------------------------------
-   // BUY
-   //--------------------------------------------------
-   RG_CreateButton(
-      RG_PREFIX+"BUY",
-      "BUY",
-      PanelX+205,
-      PanelY+66,
-      135,
-      32,
-      clrLime,
-      clrBlack);
-
-
-
-   //--------------------------------------------------
-   // SELL
-   //--------------------------------------------------
-   RG_CreateButton(
-      RG_PREFIX+"SELL",
-      "SELL",
-      PanelX+205,
-      PanelY+106,
-      135,
-      32,
-      clrRed,
-      clrWhite);
-
-
-
-   //--------------------------------------------------
-   // CLOSE ALL
-   //--------------------------------------------------
-   RG_CreateButton(
-      RG_PREFIX+"CLOSE_ALL",
-      "CLOSE ALL",
-      PanelX+205,
-      PanelY+146,
-      135,
-      32,
-      clrOrange,
-      clrBlack);
-
+RG_CreateFooter(
+   PanelX,
+   PanelY);
 
 
    return(true);
@@ -187,34 +75,23 @@ bool RG_CreatePanel()
 
 void RG_DeletePanel()
 {
+   
 
-   RG_DeleteButton(RG_PREFIX+"BUY");
+   RG_DeleteFooter();
 
-   RG_DeleteButton(RG_PREFIX+"SELL");
+   RG_DeleteActionButtons();
 
-   RG_DeleteButton(RG_PREFIX+"CLOSE_ALL");
+   RG_DeleteInputArea();
 
+   RG_DeleteStatusBar();
 
+   RG_DeleteHeader();
 
-   RG_DeleteEdit(RG_PREFIX+"LOT");
+   RG_DeletePanelObject(RG_PANEL_NAME);
 
-   RG_DeleteEdit(RG_PREFIX+"SL");
+   RG_DeleteStatusBar();
 
-   RG_DeleteEdit(RG_PREFIX+"TP");
-
-
-
-   RG_DeleteLabel(RG_PREFIX+"LOT_LBL");
-
-   RG_DeleteLabel(RG_PREFIX+"SL_LBL");
-
-   RG_DeleteLabel(RG_PREFIX+"TP_LBL");
-
-   RG_DeleteLabel(RG_PREFIX+"TITLE");
-
-   RG_DeleteLabel(RG_PREFIX+"STATUS");
-
-
+   RG_DeleteHeader();
 
    RG_DeletePanelObject(RG_PANEL_NAME);
 
