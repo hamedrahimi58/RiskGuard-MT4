@@ -4,37 +4,7 @@
 #include <RG_Settings.mqh>
 #include <Trade/RG_PositionSizer.mqh>
 #include <Trade/RG_Broker.mqh>
-
-
-int RG_CountOpenPositions()
-{
-   int count=0;
-
-   for(int i=OrdersTotal()-1;i>=0;i--)
-   {
-      if(OrderSelect(i,SELECT_BY_POS,MODE_TRADES))
-      {
-         if(OrderSymbol()==Symbol())
-            count++;
-      }
-   }
-
-   return(count);
-}
-
-
-
-bool RG_CheckPositionLimit()
-{
-   if(RG_CountOpenPositions() >= MaxOpenPositions)
-   {
-      Print("RiskGuard: Max open positions reached");
-      return(false);
-   }
-
-   return(true);
-}
-
+#include <Trade/RG_PositionManager.mqh>
 
 
 bool RG_ModifyOrder(
@@ -152,19 +122,12 @@ int RG_SendBuyOrder()
 int RG_SendSellOrder()
 {
 
-   if(!RG_CheckPositionLimit())
-      return(-1);
-
-
    RefreshRates();
 
+   double lot = RG_GetVolume();
 
-   double lot=RG_GetVolume();
-
-
-   if(!RG_CheckVolumeLimit(lot))
-      return(-1);
-
+   if(!RG_CanOpenPosition(lot))
+   return(-1);
 
 
    int ticket=OrderSend(
