@@ -43,6 +43,20 @@ bool RG_CreateActionButtons(
       clrWhite);
 
    //--------------------------------------------------
+   // BREAK EVEN
+   //--------------------------------------------------
+
+   RG_CreateButton(
+      RG_PREFIX+"BREAKEVEN",
+      "BREAK EVEN",
+      panelX + 180,
+      panelY + 155,
+      RG_BUTTON_WIDTH,
+      RG_BUTTON_HEIGHT,
+      clrDeepSkyBlue,
+      clrWhite);
+
+   //--------------------------------------------------
    // CLOSE ALL
    //--------------------------------------------------
 
@@ -50,14 +64,13 @@ bool RG_CreateActionButtons(
       RG_PREFIX+"CLOSE_ALL",
       "CLOSE ALL",
       panelX + 180,
-      panelY + 155,
+      panelY + 200,
       RG_BUTTON_WIDTH,
       RG_BUTTON_HEIGHT,
       RG_COLOR_CLOSE,
       clrBlack);
 
    return(true);
-
 }
 
 //====================================================
@@ -66,13 +79,13 @@ bool RG_CreateActionButtons(
 
 void RG_DeleteActionButtons()
 {
-
    RG_DeleteButton(RG_PREFIX+"BUY");
 
    RG_DeleteButton(RG_PREFIX+"SELL");
 
-   RG_DeleteButton(RG_PREFIX+"CLOSE_ALL");
+   RG_DeleteButton(RG_PREFIX+"BREAKEVEN");
 
+   RG_DeleteButton(RG_PREFIX+"CLOSE_ALL");
 }
 
 #endif
