@@ -69,7 +69,21 @@ bool RG_CreateActionButtons(
       RG_BUTTON_HEIGHT,
       clrDodgerBlue,
       clrWhite);
-      
+
+   //--------------------------------------------------
+   // TRAILING
+   //--------------------------------------------------
+
+   RG_CreateButton(
+      RG_PREFIX+"TRAILING",
+      "TRAILING",
+      panelX + 180,
+      panelY + 245,
+      RG_BUTTON_WIDTH,
+      RG_BUTTON_HEIGHT,
+      clrMediumSeaGreen,
+      clrWhite);
+
    //--------------------------------------------------
    // CLOSE ALL
    //--------------------------------------------------
@@ -78,7 +92,7 @@ bool RG_CreateActionButtons(
       RG_PREFIX+"CLOSE_ALL",
       "CLOSE ALL",
       panelX + 180,
-      panelY + 240,
+      panelY + 290,
       RG_BUTTON_WIDTH,
       RG_BUTTON_HEIGHT,
       RG_COLOR_CLOSE,
@@ -98,8 +112,10 @@ void RG_DeleteActionButtons()
    RG_DeleteButton(RG_PREFIX+"SELL");
 
    RG_DeleteButton(RG_PREFIX+"BREAKEVEN");
-   
+
    RG_DeleteButton(RG_PREFIX+"RISKFREE");
+
+   RG_DeleteButton(RG_PREFIX+"TRAILING");
 
    RG_DeleteButton(RG_PREFIX+"CLOSE_ALL");
 }
