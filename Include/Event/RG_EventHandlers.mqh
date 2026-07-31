@@ -8,6 +8,7 @@
 #include <Trade/RG_Trade.mqh>
 #include <Trade/RG_ProtectionManager.mqh>
 #include <Trade/RG_RiskFree.mqh>
+#include <Trade/RG_PositionCloser.mqh>
 
 #include <RG_GUI.mqh>
 
@@ -17,26 +18,18 @@
 
 void RG_OnBuy()
 {
-   RG_SetLabelText(
-      RG_PREFIX+"STATUS",
-      "Status : Sending BUY...");
+   RG_SetLabelText(RG_PREFIX+"STATUS","Status : Sending BUY...");
 
    Print("BUY Button Clicked");
 
    if(RG_Buy())
    {
-      RG_SetLabelText(
-         RG_PREFIX+"STATUS",
-         "Status : BUY Opened");
-
+      RG_SetLabelText(RG_PREFIX+"STATUS","Status : BUY Opened");
       Print("BUY Success");
    }
    else
    {
-      RG_SetLabelText(
-         RG_PREFIX+"STATUS",
-         "Status : BUY Failed");
-
+      RG_SetLabelText(RG_PREFIX+"STATUS","Status : BUY Failed");
       Print("BUY Failed");
    }
 }
@@ -47,26 +40,18 @@ void RG_OnBuy()
 
 void RG_OnSell()
 {
-   RG_SetLabelText(
-      RG_PREFIX+"STATUS",
-      "Status : Sending SELL...");
+   RG_SetLabelText(RG_PREFIX+"STATUS","Status : Sending SELL...");
 
    Print("SELL Button Clicked");
 
    if(RG_Sell())
    {
-      RG_SetLabelText(
-         RG_PREFIX+"STATUS",
-         "Status : SELL Opened");
-
+      RG_SetLabelText(RG_PREFIX+"STATUS","Status : SELL Opened");
       Print("SELL Success");
    }
    else
    {
-      RG_SetLabelText(
-         RG_PREFIX+"STATUS",
-         "Status : SELL Failed");
-
+      RG_SetLabelText(RG_PREFIX+"STATUS","Status : SELL Failed");
       Print("SELL Failed");
    }
 }
@@ -97,18 +82,12 @@ void RG_OnBreakEven()
 
    if(result)
    {
-      RG_SetLabelText(
-         RG_PREFIX+"STATUS",
-         "Status : Break Even Applied");
-
+      RG_SetLabelText(RG_PREFIX+"STATUS","Status : Break Even Applied");
       Print("Break Even Applied");
    }
    else
    {
-      RG_SetLabelText(
-         RG_PREFIX+"STATUS",
-         "Status : Break Even Failed");
-
+      RG_SetLabelText(RG_PREFIX+"STATUS","Status : Break Even Failed");
       Print("Break Even Failed");
    }
 }
@@ -139,18 +118,12 @@ void RG_OnRiskFree()
 
    if(result)
    {
-      RG_SetLabelText(
-         RG_PREFIX+"STATUS",
-         "Status : Risk Free Applied");
-
+      RG_SetLabelText(RG_PREFIX+"STATUS","Status : Risk Free Applied");
       Print("Risk Free Applied");
    }
    else
    {
-      RG_SetLabelText(
-         RG_PREFIX+"STATUS",
-         "Status : Risk Free Failed");
-
+      RG_SetLabelText(RG_PREFIX+"STATUS","Status : Risk Free Failed");
       Print("Risk Free Failed");
    }
 }
@@ -163,9 +136,22 @@ void RG_OnCloseAll()
 {
    Print("Close All Handler");
 
-   RG_SetLabelText(
-      RG_PREFIX+"STATUS",
-      "Status : Close All");
+   if(RG_CloseAll())
+   {
+      RG_SetLabelText(
+         RG_PREFIX+"STATUS",
+         "Status : All Positions Closed");
+
+      Print("All Positions Closed");
+   }
+   else
+   {
+      RG_SetLabelText(
+         RG_PREFIX+"STATUS",
+         "Status : Close All Failed");
+
+      Print("Close All Failed");
+   }
 }
 
 //====================================================
