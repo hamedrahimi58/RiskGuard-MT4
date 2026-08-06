@@ -7,24 +7,19 @@
 
 //====================================================
 // RiskGuard Trade Visualization
-// RG-029-004
+// RG-029
 //
-// Shows:
-//   ENTRY
-//   SL
-//   TP1
-//   TP2
-//   TP3
+// ENTRY
+// SL
+// Single TP
 //
-// TP1 / TP2 / TP3:
-//   - full chart lines
-//   - draggable
-//   - manual price stored in RG_TakeProfit
+// TP:
+// - Full chart line
+// - Draggable
+// - Manual price stored in RG_TakeProfit
 //
-// Labels:
-//   right side of chart
-//
-// No TP zones.
+// No Multi TP
+// No TP zones
 //====================================================
 
 #define RG_TV_PREFIX "RGTV_"
@@ -44,7 +39,6 @@ string RG_TV_EntryName(int ticket)
       +IntegerToString(ticket));
 }
 
-
 string RG_TV_SLName(int ticket)
 {
    return(
@@ -53,19 +47,13 @@ string RG_TV_SLName(int ticket)
       +IntegerToString(ticket));
 }
 
-
-string RG_TV_TPName(
-   int ticket,
-   int level)
+string RG_TV_TPName(int ticket)
 {
    return(
       RG_TV_PREFIX
-      +"TP"
-      +IntegerToString(level)
-      +"_"
+      +"TP_"
       +IntegerToString(ticket));
 }
-
 
 string RG_TV_LabelName(
    int ticket,
@@ -83,8 +71,7 @@ string RG_TV_LabelName(
 // Delete Object
 //====================================================
 
-void RG_TV_DeleteObject(
-   string name)
+void RG_TV_DeleteObject(string name)
 {
    if(ObjectFind(0,name)>=0)
       ObjectDelete(0,name);
@@ -97,8 +84,7 @@ void RG_TV_DeleteObject(
 
 datetime RG_TV_CurrentTime()
 {
-   datetime t=
-      TimeCurrent();
+   datetime t=TimeCurrent();
 
    if(t<=0)
       t=TimeLocal();
@@ -111,40 +97,10 @@ datetime RG_TV_CurrentTime()
 // TP Price
 //====================================================
 
-double RG_TV_GetTPPrice(
-   int ticket,
-   int level)
+double RG_TV_GetTPPrice(int ticket)
 {
    return(
-      RG_GetTPLevelPrice(
-         ticket,
-         level));
-}
-
-
-//====================================================
-// TP Percent
-//====================================================
-
-double RG_TV_GetTPPercent(
-   int level)
-{
-   return(
-      RG_GetTPLevelClosePercent(
-         level));
-}
-
-
-//====================================================
-// TP Configured
-//====================================================
-
-bool RG_TV_IsTPConfigured(
-   int level)
-{
-   return(
-      RG_IsTPLevelConfigured(
-         level));
+      RG_GetTPPrice(ticket));
 }
 
 
@@ -166,12 +122,10 @@ bool RG_TV_CreateLine(
       return(false);
 
    if(time1<=0)
-      time1=
-         RG_TV_CurrentTime()-60;
+      time1=RG_TV_CurrentTime()-60;
 
    if(time2<=time1)
-      time2=
-         time1+60;
+      time2=time1+60;
 
    if(ObjectFind(0,name)<0)
    {
@@ -468,8 +422,7 @@ double RG_TV_MoneyAtPrice(
 // Money Text
 //====================================================
 
-string RG_TV_MoneyText(
-   double value)
+string RG_TV_MoneyText(double value)
 {
    if(value>=0)
    {
@@ -526,8 +479,7 @@ void RG_TV_DrawEntry(
       1,
       false);
 
-   string direction=
-      "BUY";
+   string direction="BUY";
 
    if(OrderType()==OP_SELL)
       direction="SELL";
@@ -605,8 +557,7 @@ void RG_TV_DrawSL(
          price,
          Digits)
       +" "
-      +RG_TV_MoneyText(
-         money);
+      +RG_TV_MoneyText(money);
 
    RG_TV_CreateRightLabel(
       labelName,
@@ -617,33 +568,33 @@ void RG_TV_DrawSL(
 
 
 //====================================================
-// TP Level
+// Single TP
 //====================================================
 
 void RG_TV_DrawTP(
    int ticket,
-   int level,
    datetime time1,
    datetime time2)
 {
-   if(level<1 ||
-      level>3)
-      return;
-
    string lineName=
-      RG_TV_TPName(
-         ticket,
-         level);
+      RG_TV_TPName(ticket);
 
    string labelName=
       RG_TV_LabelName(
          ticket,
-         "TP"
-         +IntegerToString(level)
-         +"_LABEL");
+         "TP_LABEL");
 
-   if(!UseMultiTakeProfit ||
-      !RG_TV_IsTPConfigured(level))
+   if(!UseTakeProfit ||
+      !RG_IsTakeProfitEnabled())
+   {
+      RG_TV_DeleteObject(lineName);
+      RG_TV_DeleteObject(labelName);
+      return;
+   }
+
+   if(!OrderSelect(
+      ticket,
+      SELECT_BY_TICKET))
    {
       RG_TV_DeleteObject(lineName);
       RG_TV_DeleteObject(labelName);
@@ -651,9 +602,7 @@ void RG_TV_DrawTP(
    }
 
    double price=
-      RG_TV_GetTPPrice(
-         ticket,
-         level);
+      RG_TV_GetTPPrice(ticket);
 
    if(price<=0)
    {
@@ -662,17 +611,8 @@ void RG_TV_DrawTP(
       return;
    }
 
-   color tpColor=
-      clrLime;
-
-   if(level==2)
-      tpColor=clrAqua;
-
-   if(level==3)
-      tpColor=clrGold;
-
    //--------------------------------------------------
-   // All TP lines are draggable
+   // FINAL TP is draggable
    //--------------------------------------------------
 
    RG_TV_CreateLine(
@@ -680,13 +620,10 @@ void RG_TV_DrawTP(
       time1,
       time2,
       price,
-      tpColor,
+      clrLime,
       STYLE_DASH,
       2,
       true);
-
-   double percent=
-      RG_TV_GetTPPercent(level);
 
    double money=
       RG_TV_MoneyAtPrice(
@@ -694,35 +631,23 @@ void RG_TV_DrawTP(
          price,
          OrderLots());
 
-   double closeLots=
-      OrderLots()
-      *percent
-      /100.0;
-
    string text=
-      "TP"
-      +IntegerToString(level)
-      +" "
+      "TP "
       +DoubleToString(
          price,
          Digits)
       +" "
-      +DoubleToString(
-         percent,
-         0)
-      +"% "
-      +RG_TV_MoneyText(
-         money)
+      +RG_TV_MoneyText(money)
       +" Vol "
       +DoubleToString(
-         closeLots,
+         OrderLots(),
          2);
 
    RG_TV_CreateRightLabel(
       labelName,
       text,
       price,
-      tpColor);
+      clrLime);
 }
 
 
@@ -730,8 +655,7 @@ void RG_TV_DrawTP(
 // Position
 //====================================================
 
-void RG_TV_DrawPosition(
-   int ticket)
+void RG_TV_DrawPosition(int ticket)
 {
    if(ticket<=0)
       return;
@@ -755,12 +679,10 @@ void RG_TV_DrawPosition(
       RG_TV_CurrentTime();
 
    if(time1<=0)
-      time1=
-         time2-60;
+      time1=time2-60;
 
    if(time2<=time1)
-      time2=
-         time1+60;
+      time2=time1+60;
 
    RG_TV_DrawEntry(
       ticket,
@@ -774,19 +696,6 @@ void RG_TV_DrawPosition(
 
    RG_TV_DrawTP(
       ticket,
-      1,
-      time1,
-      time2);
-
-   RG_TV_DrawTP(
-      ticket,
-      2,
-      time1,
-      time2);
-
-   RG_TV_DrawTP(
-      ticket,
-      3,
       time1,
       time2);
 }
@@ -796,8 +705,7 @@ void RG_TV_DrawPosition(
 // Is Ticket Open
 //====================================================
 
-bool RG_TV_IsTicketOpen(
-   int ticket)
+bool RG_TV_IsTicketOpen(int ticket)
 {
    if(ticket<=0)
       return(false);
@@ -833,12 +741,10 @@ bool RG_TV_IsTicketOpen(
 // Ticket From Object Name
 //====================================================
 
-int RG_TV_GetTicketFromName(
-   string name)
+int RG_TV_GetTicketFromName(string name)
 {
    int position=-1;
-   int length=
-      StringLen(name);
+   int length=StringLen(name);
 
    for(int i=0;
        i<length;
@@ -890,8 +796,7 @@ void RG_TV_RemoveStaleObjects()
       }
 
       int ticket=
-         RG_TV_GetTicketFromName(
-            name);
+         RG_TV_GetTicketFromName(name);
 
       if(ticket<=0)
          continue;
@@ -915,41 +820,11 @@ void RG_TV_HandleObjectDrag(
 {
    if(StringFind(
       objectName,
-      RG_TV_PREFIX+"TP",
+      RG_TV_PREFIX+"TP_",
       0)!=0)
    {
       return;
    }
-
-   int level=-1;
-
-   if(StringFind(
-      objectName,
-      RG_TV_PREFIX+"TP1_",
-      0)==0)
-   {
-      level=1;
-   }
-   else
-   if(StringFind(
-      objectName,
-      RG_TV_PREFIX+"TP2_",
-      0)==0)
-   {
-      level=2;
-   }
-   else
-   if(StringFind(
-      objectName,
-      RG_TV_PREFIX+"TP3_",
-      0)==0)
-   {
-      level=3;
-   }
-
-   if(level<1 ||
-      level>3)
-      return;
 
    int ticket=
       RG_TV_GetTicketFromName(
@@ -985,19 +860,18 @@ void RG_TV_HandleObjectDrag(
          Digits);
 
    //--------------------------------------------------
-   // Store new manual TP
+   // IMPORTANT:
+   // RG_SetManualTPPrice now accepts:
+   // ticket + price
    //--------------------------------------------------
 
    if(!RG_SetManualTPPrice(
       ticket,
-      level,
       newPrice))
    {
       Print(
          "RG TP Drag Save Failed. Ticket : ",
-         ticket,
-         " Level : ",
-         level);
+         ticket);
 
       return;
    }
@@ -1005,8 +879,6 @@ void RG_TV_HandleObjectDrag(
    Print(
       "RG TP Drag Saved. Ticket : ",
       ticket,
-      " Level : ",
-      level,
       " Price : ",
       DoubleToString(
          newPrice,
@@ -1022,15 +894,7 @@ void RG_TV_HandleObjectDrag(
 
 void RG_ProcessTradeVisualization()
 {
-   //--------------------------------------------------
-   // Remove objects belonging to closed positions
-   //--------------------------------------------------
-
    RG_TV_RemoveStaleObjects();
-
-   //--------------------------------------------------
-   // Draw active positions
-   //--------------------------------------------------
 
    for(int i=OrdersTotal()-1;
        i>=0;
@@ -1057,10 +921,6 @@ void RG_ProcessTradeVisualization()
          OrderTicket());
    }
 
-   //--------------------------------------------------
-   // Second cleanup
-   //--------------------------------------------------
-
    RG_TV_RemoveStaleObjects();
 
    ChartRedraw();
@@ -1071,8 +931,7 @@ void RG_ProcessTradeVisualization()
 // Delete One Position
 //====================================================
 
-void RG_TV_DeletePosition(
-   int ticket)
+void RG_TV_DeletePosition(int ticket)
 {
    if(ticket<=0)
       return;
@@ -1083,22 +942,13 @@ void RG_TV_DeletePosition(
    RG_TV_DeleteObject(
       RG_TV_SLName(ticket));
 
-   for(int level=1;
-       level<=3;
-       level++)
-   {
-      RG_TV_DeleteObject(
-         RG_TV_TPName(
-            ticket,
-            level));
+   RG_TV_DeleteObject(
+      RG_TV_TPName(ticket));
 
-      RG_TV_DeleteObject(
-         RG_TV_LabelName(
-            ticket,
-            "TP"
-            +IntegerToString(level)
-            +"_LABEL"));
-   }
+   RG_TV_DeleteObject(
+      RG_TV_LabelName(
+         ticket,
+         "TP_LABEL"));
 
    RG_TV_DeleteObject(
       RG_TV_LabelName(

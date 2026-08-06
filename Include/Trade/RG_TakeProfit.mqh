@@ -7,68 +7,44 @@
 //====================================================
 // RiskGuard MT4
 // RG-029
-// Take Profit Engine
+// SINGLE TAKE PROFIT ENGINE
 //
-// Features
-// - Single TP
-// - Multi TP
-// - TP1 / TP2 / TP3
-// - Manual TP price
+// - One TP only
+// - Full position close
+// - One-time execution
 // - Manual TP movement persistence
-// - Partial close based on INITIAL lots
-// - State protection
-// - No EA event handlers in this file
+// - No Multi TP
+// - No partial close
 //====================================================
 
 
 //====================================================
-// Internal State Keys
+// State Key
 //====================================================
 
-string RG_TPStateKey(
-   int ticket,
-   int level)
+string RG_TPStateKey(int ticket)
 {
    return(
-      "RG_TP_"
-      + IntegerToString(ticket)
-      + "_L"
-      + IntegerToString(level));
+      "RG_TP_"+
+      IntegerToString(ticket));
 }
 
 
 //====================================================
-// Manual TP Price Key
+// Manual TP Key
 //====================================================
 
-string RG_TPManualPriceKey(
-   int ticket,
-   int level)
+string RG_TPManualPriceKey(int ticket)
 {
    return(
-      "RG_TP_"
-      + IntegerToString(ticket)
-      + "_MANUAL_"
-      + IntegerToString(level));
+      "RG_TP_"+
+      IntegerToString(ticket)+
+      "_MANUAL");
 }
 
 
 //====================================================
-// Initial Lots Key
-//====================================================
-
-string RG_TPInitialLotsKey(
-   int ticket)
-{
-   return(
-      "RG_TP_"
-      + IntegerToString(ticket)
-      + "_INITIAL_LOTS");
-}
-
-
-//====================================================
-// Take Profit Enabled
+// TP Enabled
 //====================================================
 
 bool RG_IsTakeProfitEnabled()
@@ -84,104 +60,12 @@ bool RG_IsTakeProfitEnabled()
 
 
 //====================================================
-// Multi Take Profit Enabled
+// Default TP
 //====================================================
 
-bool RG_IsMultiTakeProfitEnabled()
-{
-   if(!UseMultiTakeProfit)
-      return(false);
-
-   if(TP1Points<=0 &&
-      TP2Points<=0 &&
-      TP3Points<=0)
-      return(false);
-
-   return(true);
-}
-
-
-//====================================================
-// Get Configured TP Points
-//====================================================
-
-int RG_GetTPLevelPoints(
-   int level)
-{
-   if(level==1)
-      return(TP1Points);
-
-   if(level==2)
-      return(TP2Points);
-
-   if(level==3)
-      return(TP3Points);
-
-   return(0);
-}
-
-
-//====================================================
-// TP Close Percent
-//====================================================
-
-double RG_GetTPLevelClosePercent(
-   int level)
-{
-   if(level==1)
-      return(TP1ClosePercent);
-
-   if(level==2)
-      return(TP2ClosePercent);
-
-   if(level==3)
-      return(TP3ClosePercent);
-
-   return(0);
-}
-
-
-//====================================================
-// TP Level Configured
-//====================================================
-
-bool RG_IsTPLevelConfigured(
-   int level)
-{
-   if(level<1 || level>3)
-      return(false);
-
-   int points=
-      RG_GetTPLevelPoints(level);
-
-   double percent=
-      RG_GetTPLevelClosePercent(level);
-
-   if(points<=0)
-      return(false);
-
-   if(percent<=0)
-      return(false);
-
-   if(percent>100)
-      return(false);
-
-   return(true);
-}
-
-
-//====================================================
-// Calculate Default TP Price
-//====================================================
-
-double RG_GetDefaultTPLevelPrice(
-   int ticket,
-   int level)
+double RG_GetDefaultTPPrice(int ticket)
 {
    if(ticket<=0)
-      return(0);
-
-   if(level<1 || level>3)
       return(0);
 
    if(!OrderSelect(
@@ -193,25 +77,19 @@ double RG_GetDefaultTPLevelPrice(
       OrderType()!=OP_SELL)
       return(0);
 
-   int points=
-      RG_GetTPLevelPoints(level);
-
-   if(points<=0)
-      return(0);
-
    double price=0;
 
    if(OrderType()==OP_BUY)
    {
       price=
-         OrderOpenPrice()
-         + points*Point;
+         OrderOpenPrice()+
+         TakeProfit*Point;
    }
    else
    {
       price=
-         OrderOpenPrice()
-         - points*Point;
+         OrderOpenPrice()-
+         TakeProfit*Point;
    }
 
    return(
@@ -222,23 +100,16 @@ double RG_GetDefaultTPLevelPrice(
 
 
 //====================================================
-// Get Manual TP Price
+// Manual TP
 //====================================================
 
-double RG_GetManualTPPrice(
-   int ticket,
-   int level)
+double RG_GetManualTPPrice(int ticket)
 {
    if(ticket<=0)
       return(0);
 
-   if(level<1 || level>3)
-      return(0);
-
    string key=
-      RG_TPManualPriceKey(
-         ticket,
-         level);
+      RG_TPManualPriceKey(ticket);
 
    if(!GlobalVariableCheck(key))
       return(0);
@@ -257,17 +128,15 @@ double RG_GetManualTPPrice(
 
 
 //====================================================
-// Validate TP Price Direction
+// Validate TP Direction
 //====================================================
 
 bool RG_IsValidTPPrice(
    int ticket,
    double price)
 {
-   if(ticket<=0)
-      return(false);
-
-   if(price<=0)
+   if(ticket<=0 ||
+      price<=0)
       return(false);
 
    if(!OrderSelect(
@@ -292,29 +161,15 @@ bool RG_IsValidTPPrice(
 
 
 //====================================================
-// Set Manual TP Price
-//
-// This is called by the chart visualization when
-// trader manually moves a TP line.
-//
-// IMPORTANT:
-// This does NOT modify the broker TP.
-// It only stores the trader-selected target used
-// by the Multi TP engine.
+// Set Manual TP
 //====================================================
 
 bool RG_SetManualTPPrice(
    int ticket,
-   int level,
    double price)
 {
-   if(ticket<=0)
-      return(false);
-
-   if(level<1 || level>3)
-      return(false);
-
-   if(price<=0)
+   if(ticket<=0 ||
+      price<=0)
       return(false);
 
    if(!OrderSelect(
@@ -336,13 +191,8 @@ bool RG_SetManualTPPrice(
       price))
       return(false);
 
-   string key=
-      RG_TPManualPriceKey(
-         ticket,
-         level);
-
    GlobalVariableSet(
-      key,
+      RG_TPManualPriceKey(ticket),
       price);
 
    return(true);
@@ -350,23 +200,16 @@ bool RG_SetManualTPPrice(
 
 
 //====================================================
-// Clear Manual TP Price
+// Clear Manual TP
 //====================================================
 
-void RG_ClearManualTPPrice(
-   int ticket,
-   int level)
+void RG_ClearManualTPPrice(int ticket)
 {
    if(ticket<=0)
       return;
 
-   if(level<1 || level>3)
-      return;
-
    string key=
-      RG_TPManualPriceKey(
-         ticket,
-         level);
+      RG_TPManualPriceKey(ticket);
 
    if(GlobalVariableCheck(key))
       GlobalVariableDel(key);
@@ -374,43 +217,15 @@ void RG_ClearManualTPPrice(
 
 
 //====================================================
-// Clear All Manual TP Prices
+// Active TP Price
+//
+// Manual TP has priority.
+// Otherwise configured TP is used.
 //====================================================
 
-void RG_ClearAllManualTPPrices(
-   int ticket)
+double RG_GetTPPrice(int ticket)
 {
    if(ticket<=0)
-      return;
-
-   for(int level=1;level<=3;level++)
-   {
-      RG_ClearManualTPPrice(
-         ticket,
-         level);
-   }
-}
-
-
-//====================================================
-// TP Level Price
-//
-// Priority:
-// 1. Manual TP price
-// 2. Default TP price
-//
-// This is intentionally NOT based on OrderTakeProfit()
-// because Multi TP must be independently controllable.
-//====================================================
-
-double RG_GetTPLevelPrice(
-   int ticket,
-   int level)
-{
-   if(ticket<=0)
-      return(0);
-
-   if(level<1 || level>3)
       return(0);
 
    if(!OrderSelect(
@@ -422,71 +237,106 @@ double RG_GetTPLevelPrice(
       OrderType()!=OP_SELL)
       return(0);
 
-   //--------------------------------------------------
-   // Manual target
-   //--------------------------------------------------
+   double manual=
+      RG_GetManualTPPrice(ticket);
 
-   double manualPrice=
-      RG_GetManualTPPrice(
-         ticket,
-         level);
-
-   if(manualPrice>0)
+   if(manual>0)
    {
       if(RG_IsValidTPPrice(
          ticket,
-         manualPrice))
+         manual))
       {
-         return(manualPrice);
+         return(manual);
       }
 
-      //------------------------------------------------
-      // Invalid manual value -> remove it
-      //------------------------------------------------
-
-      RG_ClearManualTPPrice(
-         ticket,
-         level);
+      RG_ClearManualTPPrice(ticket);
    }
 
-   //--------------------------------------------------
-   // Default target
-   //--------------------------------------------------
-
    return(
-      RG_GetDefaultTPLevelPrice(
-         ticket,
-         level));
+      RG_GetDefaultTPPrice(ticket));
 }
 
 
 //====================================================
-// TP Level Reached
+// TP State
 //====================================================
 
-bool RG_IsTPLevelReached(
-   int ticket,
-   int level)
+bool RG_TPStateExists(int ticket)
 {
    if(ticket<=0)
       return(false);
 
-   if(!RG_IsTPLevelConfigured(level))
+   string key=
+      RG_TPStateKey(ticket);
+
+   if(!GlobalVariableCheck(key))
+      return(false);
+
+   return(
+      GlobalVariableGet(key)>0);
+}
+
+
+//====================================================
+// Mark TP Completed
+//====================================================
+
+void RG_MarkTPCompleted(int ticket)
+{
+   if(ticket<=0)
+      return;
+
+   GlobalVariableSet(
+      RG_TPStateKey(ticket),
+      1.0);
+}
+
+
+//====================================================
+// Clear TP State
+//====================================================
+
+void RG_ClearTPState(int ticket)
+{
+   if(ticket<=0)
+      return;
+
+   string key=
+      RG_TPStateKey(ticket);
+
+   if(GlobalVariableCheck(key))
+      GlobalVariableDel(key);
+
+   RG_ClearManualTPPrice(ticket);
+}
+
+
+//====================================================
+// TP Reached
+//====================================================
+
+bool RG_IsTPReached(int ticket)
+{
+   if(ticket<=0)
+      return(false);
+
+   if(RG_TPStateExists(ticket))
       return(false);
 
    if(!OrderSelect(
       ticket,
       SELECT_BY_TICKET))
+   {
+      RG_ClearTPState(ticket);
       return(false);
+   }
 
    if(OrderType()!=OP_BUY &&
       OrderType()!=OP_SELL)
       return(false);
 
    double target=
-      RG_GetTPLevelPrice(
-         ticket,
-         level);
+      RG_GetTPPrice(ticket);
 
    if(target<=0)
       return(false);
@@ -510,115 +360,36 @@ bool RG_IsTPLevelReached(
 
 
 //====================================================
-// State Exists
+// Execute Single TP
+//
+// IMPORTANT:
+// The complete current position is closed.
+// No partial close.
+// No second execution.
 //====================================================
 
-bool RG_TPStateExists(
-   int ticket,
-   int level)
+bool RG_ExecuteTakeProfit(int ticket)
 {
    if(ticket<=0)
       return(false);
 
-   if(level<1 || level>3)
-      return(false);
-
-   string key=
-      RG_TPStateKey(
-         ticket,
-         level);
-
-   if(!GlobalVariableCheck(key))
-      return(false);
-
-   return(
-      GlobalVariableGet(key)>0);
-}
-
-
-//====================================================
-// Mark TP Completed
-//====================================================
-
-void RG_MarkTPCompleted(
-   int ticket,
-   int level)
-{
-   if(ticket<=0)
-      return;
-
-   if(level<1 || level>3)
-      return;
-
-   GlobalVariableSet(
-      RG_TPStateKey(
-         ticket,
-         level),
-      1.0);
-}
-
-
-//====================================================
-// Clear TP State
-//====================================================
-
-void RG_ClearTPState(
-   int ticket)
-{
-   if(ticket<=0)
-      return;
-
-   for(int level=1;level<=3;level++)
-   {
-      string stateKey=
-         RG_TPStateKey(
-            ticket,
-            level);
-
-      if(GlobalVariableCheck(stateKey))
-         GlobalVariableDel(stateKey);
-
-      string manualKey=
-         RG_TPManualPriceKey(
-            ticket,
-            level);
-
-      if(GlobalVariableCheck(manualKey))
-         GlobalVariableDel(manualKey);
-   }
-
-   string initialKey=
-      RG_TPInitialLotsKey(ticket);
-
-   if(GlobalVariableCheck(initialKey))
-      GlobalVariableDel(initialKey);
-}
-
-
-//====================================================
-// Store Initial Lots
-//====================================================
-
-bool RG_StoreInitialLots(
-   int ticket)
-{
-   if(ticket<=0)
+   if(RG_TPStateExists(ticket))
       return(false);
 
    if(!OrderSelect(
       ticket,
       SELECT_BY_TICKET))
+   {
+      RG_ClearTPState(ticket);
       return(false);
+   }
 
    if(OrderType()!=OP_BUY &&
       OrderType()!=OP_SELL)
       return(false);
 
-   string key=
-      RG_TPInitialLotsKey(ticket);
-
-   if(GlobalVariableCheck(key))
-      return(true);
+   if(!RG_IsTPReached(ticket))
+      return(false);
 
    double lots=
       OrderLots();
@@ -626,288 +397,30 @@ bool RG_StoreInitialLots(
    if(lots<=0)
       return(false);
 
-   GlobalVariableSet(
-      key,
-      lots);
-
-   return(true);
-}
-
-
-//====================================================
-// Get Initial Lots
-//====================================================
-
-double RG_GetInitialLots(
-   int ticket)
-{
-   if(ticket<=0)
-      return(0);
-
-   string key=
-      RG_TPInitialLotsKey(ticket);
-
-   if(GlobalVariableCheck(key))
-   {
-      double lots=
-         GlobalVariableGet(key);
-
-      if(lots>0)
-         return(lots);
-   }
-
-   //--------------------------------------------------
-   // First access
-   //--------------------------------------------------
-
-   if(!RG_StoreInitialLots(ticket))
-      return(0);
-
-   if(!GlobalVariableCheck(key))
-      return(0);
-
-   return(
-      GlobalVariableGet(key));
-}
-
-
-//====================================================
-// Partial Close Lots
-//
-// All percentages are calculated from INITIAL lots.
-//====================================================
-
-double RG_GetPartialCloseLots(
-   int ticket,
-   int level)
-{
-   if(ticket<=0)
-      return(0);
-
-   if(!RG_IsTPLevelConfigured(level))
-      return(0);
-
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
-      return(0);
-
-   if(OrderType()!=OP_BUY &&
-      OrderType()!=OP_SELL)
-      return(0);
-
-   double currentLots=
-      OrderLots();
-
-   if(currentLots<=0)
-      return(0);
-
-   double initialLots=
-      RG_GetInitialLots(ticket);
-
-   if(initialLots<=0)
-      return(0);
-
-   double percent=
-      RG_GetTPLevelClosePercent(level);
-
-   if(percent<=0)
-      return(0);
-
-   if(percent>100)
-      percent=100;
-
-   //--------------------------------------------------
-   // Calculate from INITIAL volume
-   //--------------------------------------------------
-
-   double closeLots=
-      initialLots*
-      percent/
-      100.0;
-
-   double minLot=
-      MarketInfo(
-         OrderSymbol(),
-         MODE_MINLOT);
-
-   double lotStep=
-      MarketInfo(
-         OrderSymbol(),
-         MODE_LOTSTEP);
-
-   if(lotStep<=0)
-      lotStep=0.01;
-
-   if(minLot<=0)
-      minLot=lotStep;
-
-   //--------------------------------------------------
-   // Normalize DOWN
-   //--------------------------------------------------
-
-   closeLots=
-      MathFloor(
-         closeLots/
-         lotStep+
-         0.0000001)
-      *lotStep;
-
-   //--------------------------------------------------
-   // Never close more than current lots
-   //--------------------------------------------------
-
-   if(closeLots>currentLots)
-      closeLots=currentLots;
-
-   //--------------------------------------------------
-   // TP3 closes remaining position
-   //--------------------------------------------------
-
-   if(level==3)
-      closeLots=currentLots;
-
-   //--------------------------------------------------
-   // Normalize
-   //--------------------------------------------------
-
-   closeLots=
-      NormalizeDouble(
-         closeLots,
-         2);
-
-   if(closeLots<=0)
-      return(0);
-
-   //--------------------------------------------------
-   // Prevent invalid remaining volume
-   //--------------------------------------------------
-
-   double remainingLots=
-      currentLots-closeLots;
-
-   if(remainingLots>0 &&
-      remainingLots<minLot)
-   {
-      closeLots=currentLots;
-   }
-
-   return(
-      NormalizeDouble(
-         closeLots,
-         2));
-}
-
-
-//====================================================
-// Execute TP Level
-//====================================================
-
-bool RG_ExecuteTPLevel(
-   int ticket,
-   int level)
-{
-   if(ticket<=0)
-      return(false);
-
-   if(level<1 || level>3)
-      return(false);
-
-   //--------------------------------------------------
-   // Already completed
-   //--------------------------------------------------
-
-   if(RG_TPStateExists(
-      ticket,
-      level))
-      return(false);
-
-   //--------------------------------------------------
-   // Position must exist
-   //--------------------------------------------------
-
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
-   {
-      RG_ClearTPState(ticket);
-      return(false);
-   }
-
-   if(OrderType()!=OP_BUY &&
-      OrderType()!=OP_SELL)
-      return(false);
-
-   //--------------------------------------------------
-   // Check target
-   //--------------------------------------------------
-
-   if(!RG_IsTPLevelReached(
-      ticket,
-      level))
-      return(false);
-
-   //--------------------------------------------------
-   // Calculate close lots
-   //--------------------------------------------------
-
-   double closeLots=
-      RG_GetPartialCloseLots(
-         ticket,
-         level);
-
-   if(closeLots<=0)
-   {
-      Print(
-         "RG TP Execution Skipped. Ticket=",
-         ticket,
-         " Level=",
-         level,
-         " InvalidLots.");
-
-      return(false);
-   }
-
-   //--------------------------------------------------
-   // Execute
-   //--------------------------------------------------
-
    if(!RG_ClosePartial(
       ticket,
-      closeLots))
+      lots))
    {
       Print(
-         "RG TP Execution Failed. Ticket=",
-         ticket,
-         " Level=",
-         level);
+         "RG Single TP Execution Failed. Ticket=",
+         ticket);
 
       return(false);
    }
 
-   //--------------------------------------------------
-   // Mark ONLY after successful close
-   //--------------------------------------------------
-
-   RG_MarkTPCompleted(
-      ticket,
-      level);
+   // Mark completed immediately after successful close.
+   RG_MarkTPCompleted(ticket);
 
    Print(
-      "RG TP Execution Completed. Ticket=",
+      "RG Single TP Execution Completed. Ticket=",
       ticket,
-      " Level=",
-      level,
       " ClosedLots=",
       DoubleToString(
-         closeLots,
+         lots,
          2));
 
-   //--------------------------------------------------
-   // If position no longer exists,
-   // clean all state.
-   //--------------------------------------------------
-
+   // Position is normally gone here.
+   // Keep state cleanup consistent.
    if(!OrderSelect(
       ticket,
       SELECT_BY_TICKET))
@@ -920,106 +433,66 @@ bool RG_ExecuteTPLevel(
 
 
 //====================================================
-// Process Take Profit
+// Process TP
 //====================================================
 
-bool RG_ProcessTakeProfit(
-   int ticket)
+bool RG_ProcessTakeProfit(int ticket)
 {
    if(ticket<=0)
       return(false);
 
-   if(!RG_IsMultiTakeProfitEnabled())
+   if(!RG_IsTakeProfitEnabled())
       return(false);
 
-   //--------------------------------------------------
-   // Position exists?
-   //--------------------------------------------------
-
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
+   if(!RG_TPStateExists(ticket))
    {
-      RG_ClearTPState(ticket);
-      return(false);
-   }
-
-   if(OrderType()!=OP_BUY &&
-      OrderType()!=OP_SELL)
-      return(false);
-
-   //--------------------------------------------------
-   // Store initial volume once
-   //--------------------------------------------------
-
-   if(RG_GetInitialLots(ticket)<=0)
-      return(false);
-
-   bool result=false;
-
-   //--------------------------------------------------
-   // Process in sequence
-   //--------------------------------------------------
-
-   for(int level=1;level<=3;level++)
-   {
-      if(!RG_IsTPLevelConfigured(level))
-         continue;
-
-      if(RG_TPStateExists(
+      if(!OrderSelect(
          ticket,
-         level))
-         continue;
-
-      if(RG_ExecuteTPLevel(
-         ticket,
-         level))
+         SELECT_BY_TICKET))
       {
-         result=true;
-
-         //------------------------------------------------
-         // Position may have been fully closed
-         //------------------------------------------------
-
-         if(!OrderSelect(
-            ticket,
-            SELECT_BY_TICKET))
-         {
-            break;
-         }
-
-         if(OrderLots()<=0)
-            break;
+         RG_ClearTPState(ticket);
+         return(false);
       }
+
+      if(OrderType()!=OP_BUY &&
+         OrderType()!=OP_SELL)
+         return(false);
    }
 
-   return(result);
+   return(
+      RG_ExecuteTakeProfit(ticket));
 }
 
 
 //====================================================
-// Process All Take Profits
+// Process All TPs
 //====================================================
 
 void RG_ProcessTakeProfits()
 {
-   if(!RG_IsMultiTakeProfitEnabled())
+   if(!RG_IsTakeProfitEnabled())
       return;
 
-   for(int i=OrdersTotal()-1;i>=0;i--)
+   for(int i=OrdersTotal()-1;
+       i>=0;
+       i--)
    {
       if(!OrderSelect(
          i,
          SELECT_BY_POS,
          MODE_TRADES))
+      {
          continue;
+      }
 
       if(OrderSymbol()!=Symbol())
          continue;
 
       if(OrderType()!=OP_BUY &&
          OrderType()!=OP_SELL)
+      {
          continue;
+      }
 
       int ticket=
          OrderTicket();
@@ -1027,6 +500,5 @@ void RG_ProcessTakeProfits()
       RG_ProcessTakeProfit(ticket);
    }
 }
-
 
 #endif

@@ -15,7 +15,6 @@ bool RG_CreateFooter(
    int panelX,
    int panelY)
 {
-
    RG_CreateLabel(
       RG_PREFIX+"FOOTER_SYMBOL",
       "Symbol : ---",
@@ -41,16 +40,74 @@ bool RG_CreateFooter(
       9);
 
    RG_CreateLabel(
-      RG_PREFIX+"FOOTER_LOT",
-      "Max Lot : "+DoubleToString(MaxLot,2),
+      RG_PREFIX+"FOOTER_PROFIT",
+      "P/L : $0.00",
       panelX + 150,
       panelY + 210,
       RG_COLOR_TEXT,
       9);
 
    return(true);
-
 }
+
+
+//====================================================
+// Floating Profit
+//====================================================
+
+double RG_GetFloatingProfit()
+{
+   double total=0;
+
+   for(int i=OrdersTotal()-1;
+       i>=0;
+       i--)
+   {
+      if(!OrderSelect(
+         i,
+         SELECT_BY_POS,
+         MODE_TRADES))
+         continue;
+
+      if(OrderSymbol()!=Symbol())
+         continue;
+
+      if(OrderType()!=OP_BUY &&
+         OrderType()!=OP_SELL)
+         continue;
+
+      total+=OrderProfit();
+      total+=OrderSwap();
+      total+=OrderCommission();
+   }
+
+   return(total);
+}
+
+
+//====================================================
+// Profit Text
+//====================================================
+
+string RG_GetProfitText(
+   double value)
+{
+   if(value>=0)
+   {
+      return(
+         "+$"
+         +DoubleToString(
+            value,
+            2));
+   }
+
+   return(
+      "-$"
+      +DoubleToString(
+         MathAbs(value),
+         2));
+}
+
 
 //====================================================
 // Refresh Footer
@@ -58,10 +115,16 @@ bool RG_CreateFooter(
 
 void RG_UpdateFooter()
 {
+   string symbol=
+      Symbol();
 
-   string symbol = Symbol();
+   int spread=
+      (int)MarketInfo(
+         symbol,
+         MODE_SPREAD);
 
-   int spread = (int)MarketInfo(symbol,MODE_SPREAD);
+   double profit=
+      RG_GetFloatingProfit();
 
    RG_SetLabelText(
       RG_PREFIX+"FOOTER_SYMBOL",
@@ -69,16 +132,26 @@ void RG_UpdateFooter()
 
    RG_SetLabelText(
       RG_PREFIX+"FOOTER_SPREAD",
-      "Spread : "+IntegerToString(spread));
+      "Spread : "
+      +IntegerToString(
+         spread));
 
    RG_SetLabelText(
       RG_PREFIX+"FOOTER_OPEN",
-      "Open : "+
-      IntegerToString(OrdersTotal())+
-      " / "+
-      IntegerToString(MaxOpenPositions));
+      "Open : "
+      +IntegerToString(
+         OrdersTotal())
+      +" / "
+      +IntegerToString(
+         MaxOpenPositions));
 
+   RG_SetLabelText(
+      RG_PREFIX+"FOOTER_PROFIT",
+      "P/L : "
+      +RG_GetProfitText(
+         profit));
 }
+
 
 //====================================================
 // Delete Footer
@@ -86,12 +159,18 @@ void RG_UpdateFooter()
 
 void RG_DeleteFooter()
 {
+   RG_DeleteLabel(
+      RG_PREFIX+"FOOTER_SYMBOL");
 
-   RG_DeleteLabel(RG_PREFIX+"FOOTER_SYMBOL");
-   RG_DeleteLabel(RG_PREFIX+"FOOTER_SPREAD");
-   RG_DeleteLabel(RG_PREFIX+"FOOTER_OPEN");
-   RG_DeleteLabel(RG_PREFIX+"FOOTER_LOT");
+   RG_DeleteLabel(
+      RG_PREFIX+"FOOTER_SPREAD");
 
+   RG_DeleteLabel(
+      RG_PREFIX+"FOOTER_OPEN");
+
+   RG_DeleteLabel(
+      RG_PREFIX+"FOOTER_PROFIT");
 }
+
 
 #endif
