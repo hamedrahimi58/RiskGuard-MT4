@@ -5,101 +5,95 @@
 #include <GUI/RG_Button.mqh>
 #include <GUI/RG_Theme.mqh>
 
+
 //====================================================
-// Create Buttons
+// Create Action Buttons
 //====================================================
 
 bool RG_CreateActionButtons(
    int panelX,
-   int panelY)
+   int panelY
+)
 {
 
-   //--------------------------------------------------
-   // BUY
-   //--------------------------------------------------
+// BUY
+RG_CreateButton(
+   RG_PREFIX+"BUY",
+   "BUY",
+   panelX+180,
+   panelY+65,
+   RG_BUTTON_WIDTH,
+   RG_BUTTON_HEIGHT,
+   RG_COLOR_BUY,
+   clrBlack);
 
-   RG_CreateButton(
-      RG_PREFIX+"BUY",
-      "BUY",
-      panelX + 180,
-      panelY + 65,
-      RG_BUTTON_WIDTH,
-      RG_BUTTON_HEIGHT,
-      RG_COLOR_BUY,
-      clrBlack);
 
-   //--------------------------------------------------
-   // SELL
-   //--------------------------------------------------
+// SELL
+RG_CreateButton(
+   RG_PREFIX+"SELL",
+   "SELL",
+   panelX+180,
+   panelY+110,
+   RG_BUTTON_WIDTH,
+   RG_BUTTON_HEIGHT,
+   RG_COLOR_SELL,
+   clrWhite);
 
-   RG_CreateButton(
-      RG_PREFIX+"SELL",
-      "SELL",
-      panelX + 180,
-      panelY + 110,
-      RG_BUTTON_WIDTH,
-      RG_BUTTON_HEIGHT,
-      RG_COLOR_SELL,
-      clrWhite);
 
-   //--------------------------------------------------
-   // BREAK EVEN
-   //--------------------------------------------------
+// BREAK EVEN
+RG_CreateButton(
+   RG_PREFIX+"BREAKEVEN",
+   "BE",
+   panelX+180,
+   panelY+155,
+   RG_BUTTON_WIDTH,
+   RG_BUTTON_HEIGHT,
+   clrDeepSkyBlue,
+   clrWhite);
 
-   RG_CreateButton(
-      RG_PREFIX+"BREAKEVEN",
-      "BREAK EVEN",
-      panelX + 180,
-      panelY + 155,
-      RG_BUTTON_WIDTH,
-      RG_BUTTON_HEIGHT,
-      clrDeepSkyBlue,
-      clrWhite);
 
-   //--------------------------------------------------
-   // RISK FREE
-   //--------------------------------------------------
+// RISK FREE
+RG_CreateButton(
+   RG_PREFIX+"RISKFREE",
+   "RF",
+   panelX+180,
+   panelY+200,
+   RG_BUTTON_WIDTH,
+   RG_BUTTON_HEIGHT,
+   clrDodgerBlue,
+   clrWhite);
 
-   RG_CreateButton(
-      RG_PREFIX+"RISKFREE",
-      "RISK FREE",
-      panelX + 180,
-      panelY + 200,
-      RG_BUTTON_WIDTH,
-      RG_BUTTON_HEIGHT,
-      clrDodgerBlue,
-      clrWhite);
 
-   //--------------------------------------------------
-   // TRAILING
-   //--------------------------------------------------
+// TRAILING
+RG_CreateButton(
+   RG_PREFIX+"TRAILING",
+   "TR",
+   panelX+180,
+   panelY+245,
+   RG_BUTTON_WIDTH,
+   RG_BUTTON_HEIGHT,
+   clrMediumSeaGreen,
+   clrWhite);
 
-   RG_CreateButton(
-      RG_PREFIX+"TRAILING",
-      "TRAILING",
-      panelX + 180,
-      panelY + 245,
-      RG_BUTTON_WIDTH,
-      RG_BUTTON_HEIGHT,
-      clrMediumSeaGreen,
-      clrWhite);
 
-   //--------------------------------------------------
-   // CLOSE ALL
-   //--------------------------------------------------
+// CLOSE ALL
+RG_CreateButton(
+   RG_PREFIX+"CLOSE_ALL",
+   "CA",
+   panelX+180,
+   panelY+290,
+   RG_BUTTON_WIDTH,
+   RG_BUTTON_HEIGHT,
+   RG_COLOR_CLOSE,
+   clrBlack);
 
-   RG_CreateButton(
-      RG_PREFIX+"CLOSE_ALL",
-      "CLOSE ALL",
-      panelX + 180,
-      panelY + 290,
-      RG_BUTTON_WIDTH,
-      RG_BUTTON_HEIGHT,
-      RG_COLOR_CLOSE,
-      clrBlack);
 
-   return(true);
+
+return(true);
+
 }
+
+
 
 //====================================================
 // Delete Buttons
@@ -107,17 +101,32 @@ bool RG_CreateActionButtons(
 
 void RG_DeleteActionButtons()
 {
-   RG_DeleteButton(RG_PREFIX+"BUY");
 
-   RG_DeleteButton(RG_PREFIX+"SELL");
+RG_DeleteButton(
+   RG_PREFIX+"BUY");
 
-   RG_DeleteButton(RG_PREFIX+"BREAKEVEN");
 
-   RG_DeleteButton(RG_PREFIX+"RISKFREE");
+RG_DeleteButton(
+   RG_PREFIX+"SELL");
 
-   RG_DeleteButton(RG_PREFIX+"TRAILING");
 
-   RG_DeleteButton(RG_PREFIX+"CLOSE_ALL");
+RG_DeleteButton(
+   RG_PREFIX+"BREAKEVEN");
+
+
+RG_DeleteButton(
+   RG_PREFIX+"RISKFREE");
+
+
+RG_DeleteButton(
+   RG_PREFIX+"TRAILING");
+
+
+RG_DeleteButton(
+   RG_PREFIX+"CLOSE_ALL");
+
 }
+
+
 
 #endif

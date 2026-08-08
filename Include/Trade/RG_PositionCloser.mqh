@@ -2,6 +2,7 @@
 #define __RG_POSITION_CLOSER_MQH__
 
 #include <RG_Settings.mqh>
+#include <Core/RG_Defines.mqh>
 
 //====================================================
 // Position Closer
@@ -217,6 +218,9 @@ bool RG_CloseAll()
          continue;
 
       if(OrderSymbol()!=Symbol())
+         continue;
+
+      if(OrderMagicNumber()!=MagicNumber)
          continue;
 
       if(OrderType()!=OP_BUY &&
