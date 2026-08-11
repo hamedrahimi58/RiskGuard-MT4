@@ -3,75 +3,50 @@
 
 #include <RG_Settings.mqh>
 
-
 //====================================================
 // RiskGuard MT4
-// SINGLE POSITION RISK FREE
+// RISK FREE
 //
-// - Move SL to Break Even + Offset
-// - Keep existing TP
-// - Store RiskFree state
-// - Compatible with RG_PositionManager
-//====================================================
-
-
-//====================================================
-// RiskFree State Key
+// Automatic RF:
+//   waits for RiskFreeTrigger
+//
+// Manual RF:
+//   position-row RF button applies BE + configured
+//   RiskFree offset immediately, without the trigger.
+//
+// RiskFree state is stored per ticket.
 //====================================================
 
 string RG_RF_StateKey(int ticket)
 {
    return(
-      "RG_RF_DONE_" +
-      IntegerToString(ticket)
+      "RG_RF_DONE_"+IntegerToString(ticket)
    );
 }
-
-
-//====================================================
-// Check RiskFree Done
-//====================================================
 
 bool RG_IsRiskFreeDone(int ticket)
 {
    if(ticket<=0)
       return(false);
 
-
-   string key =
-      RG_RF_StateKey(ticket);
-
+   string key=RG_RF_StateKey(ticket);
 
    if(!GlobalVariableCheck(key))
       return(false);
 
-
-   return(
-      GlobalVariableGet(key)>0
-   );
+   return(GlobalVariableGet(key)>0);
 }
-
-
-//====================================================
-// Mark RiskFree Done
-//====================================================
 
 void RG_MarkRiskFreeDone(int ticket)
 {
    if(ticket<=0)
       return;
 
-
    GlobalVariableSet(
       RG_RF_StateKey(ticket),
       1.0
    );
 }
-
-
-//====================================================
-// Market Order Check
-//====================================================
 
 bool RG_RiskFree_IsMarketOrder()
 {
@@ -81,85 +56,249 @@ bool RG_RiskFree_IsMarketOrder()
    );
 }
 
-
 //====================================================
-// Process One Ticket
+// Calculate manual RF target
 //====================================================
 
-bool RG_ProcessRiskFreeTicket(int ticket)
+bool RG_RiskFree_GetManualTarget(
+   int ticket,
+   double &newSL)
 {
+   newSL=0.0;
 
    if(ticket<=0)
       return(false);
-
-
-   if(!UseRiskFree)
-      return(false);
-
-
 
    if(!OrderSelect(
       ticket,
       SELECT_BY_TICKET))
       return(false);
 
-
+   if(OrderSymbol()!=Symbol() ||
+      OrderMagicNumber()!=MagicNumber)
+      return(false);
 
    if(!RG_RiskFree_IsMarketOrder())
       return(false);
 
-
-
-   if(RG_IsRiskFreeDone(ticket))
-      return(false);
-
-
-
    RefreshRates();
 
-
-
-   double openPrice =
+   double openPrice=
       NormalizeDouble(
          OrderOpenPrice(),
          Digits);
 
-
-
-   double trigger =
-      RiskFreeTrigger * Point;
-
-
-
-   double offset =
-      (RiskFreeOffset +
-       RiskFreeExtraPoints)
-       * Point;
-
-
-
-   double newSL = 0;
-
-
-
-//====================================================
-// BUY
-//====================================================
+   double offset=
+      (RiskFreeOffset+
+       RiskFreeExtraPoints)*
+      Point;
 
    if(OrderType()==OP_BUY)
    {
-
-      if(Bid-openPrice < trigger)
-         return(false);
-
-
-
-      newSL =
+      newSL=
          NormalizeDouble(
             openPrice+offset,
             Digits);
 
+      if(newSL>=Bid)
+         return(false);
+   }
+   else
+   {
+      newSL=
+         NormalizeDouble(
+            openPrice-offset,
+            Digits);
 
+      if(newSL<=Ask)
+         return(false);
+   }
+
+   return(true);
+}
+
+//====================================================
+// Manual RiskFree
+//
+// Does NOT require RiskFreeTrigger.
+//====================================================
+
+bool RG_ApplyManualRiskFree(int ticket)
+{
+   if(ticket<=0)
+      return(false);
+
+   if(!UseRiskFree)
+      return(false);
+
+   if(!OrderSelect(
+      ticket,
+      SELECT_BY_TICKET))
+      return(false);
+
+   if(OrderSymbol()!=Symbol() ||
+      OrderMagicNumber()!=MagicNumber)
+      return(false);
+
+   if(!RG_RiskFree_IsMarketOrder())
+      return(false);
+
+   if(RG_IsRiskFreeDone(ticket))
+      return(true);
+
+   double newSL=0.0;
+
+   if(!RG_RiskFree_GetManualTarget(
+      ticket,newSL))
+   {
+      Print(
+         "RG Manual RF: target is not currently valid. Ticket=",
+         ticket,
+         " Bid=",
+         DoubleToString(Bid,Digits),
+         " Ask=",
+         DoubleToString(Ask,Digits)
+      );
+
+      return(false);
+   }
+
+   double stopLevel=
+      MarketInfo(
+         OrderSymbol(),
+         MODE_STOPLEVEL)*
+      MarketInfo(
+         OrderSymbol(),
+         MODE_POINT);
+
+   double freezeLevel=
+      MarketInfo(
+         OrderSymbol(),
+         MODE_FREEZELEVEL)*
+      MarketInfo(
+         OrderSymbol(),
+         MODE_POINT);
+
+   double minDistance=
+      MathMax(stopLevel,freezeLevel);
+
+   if(OrderType()==OP_BUY)
+   {
+      if(Bid-newSL<minDistance)
+      {
+         Print(
+            "RG Manual RF: broker stop/freeze distance prevents RF. Ticket=",
+            ticket
+         );
+
+         return(false);
+      }
+
+      if(OrderStopLoss()>0 &&
+         OrderStopLoss()>=newSL)
+      {
+         RG_MarkRiskFreeDone(ticket);
+         return(true);
+      }
+   }
+   else
+   {
+      if(newSL-Ask<minDistance)
+      {
+         Print(
+            "RG Manual RF: broker stop/freeze distance prevents RF. Ticket=",
+            ticket
+         );
+
+         return(false);
+      }
+
+      if(OrderStopLoss()>0 &&
+         OrderStopLoss()<=newSL)
+      {
+         RG_MarkRiskFreeDone(ticket);
+         return(true);
+      }
+   }
+
+   ResetLastError();
+
+   if(!OrderModify(
+      ticket,
+      OrderOpenPrice(),
+      newSL,
+      OrderTakeProfit(),
+      0,
+      clrNONE))
+   {
+      int error=GetLastError();
+
+      Print(
+         "RG Manual RF failed. Ticket=",
+         ticket,
+         " Error=",
+         error,
+         " NewSL=",
+         DoubleToString(newSL,Digits)
+      );
+
+      return(false);
+   }
+
+   RG_MarkRiskFreeDone(ticket);
+
+   return(true);
+}
+
+//====================================================
+// Automatic RiskFree for one ticket
+//====================================================
+
+bool RG_ProcessRiskFreeTicket(int ticket)
+{
+   if(ticket<=0)
+      return(false);
+
+   if(!UseRiskFree)
+      return(false);
+
+   if(!OrderSelect(
+      ticket,
+      SELECT_BY_TICKET))
+      return(false);
+
+   if(!RG_RiskFree_IsMarketOrder())
+      return(false);
+
+   if(RG_IsRiskFreeDone(ticket))
+      return(false);
+
+   RefreshRates();
+
+   double openPrice=
+      NormalizeDouble(
+         OrderOpenPrice(),
+         Digits);
+
+   double trigger=
+      RiskFreeTrigger*Point;
+
+   double offset=
+      (RiskFreeOffset+
+       RiskFreeExtraPoints)*
+      Point;
+
+   double newSL=0.0;
+
+   if(OrderType()==OP_BUY)
+   {
+      if(Bid-openPrice<trigger)
+         return(false);
+
+      newSL=
+         NormalizeDouble(
+            openPrice+offset,
+            Digits);
 
       if(OrderStopLoss()>0 &&
          OrderStopLoss()>=newSL)
@@ -168,15 +307,10 @@ bool RG_ProcessRiskFreeTicket(int ticket)
          return(false);
       }
 
-
-
       if(newSL>=Bid)
          return(false);
 
-
-
       ResetLastError();
-
 
       if(!OrderModify(
          ticket,
@@ -186,7 +320,6 @@ bool RG_ProcessRiskFreeTicket(int ticket)
          0,
          clrNONE))
       {
-
          Print(
             "RG RiskFree BUY failed. Ticket=",
             ticket,
@@ -194,37 +327,22 @@ bool RG_ProcessRiskFreeTicket(int ticket)
             GetLastError()
          );
 
-
          return(false);
       }
 
-
-
       RG_MarkRiskFreeDone(ticket);
-
       return(true);
    }
 
-
-
-//====================================================
-// SELL
-//====================================================
-
    if(OrderType()==OP_SELL)
    {
-
-      if(openPrice-Ask < trigger)
+      if(openPrice-Ask<trigger)
          return(false);
 
-
-
-      newSL =
+      newSL=
          NormalizeDouble(
             openPrice-offset,
             Digits);
-
-
 
       if(OrderStopLoss()>0 &&
          OrderStopLoss()<=newSL)
@@ -233,15 +351,10 @@ bool RG_ProcessRiskFreeTicket(int ticket)
          return(false);
       }
 
-
-
       if(newSL<=Ask)
          return(false);
 
-
-
       ResetLastError();
-
 
       if(!OrderModify(
          ticket,
@@ -251,7 +364,6 @@ bool RG_ProcessRiskFreeTicket(int ticket)
          0,
          clrNONE))
       {
-
          Print(
             "RG RiskFree SELL failed. Ticket=",
             ticket,
@@ -259,71 +371,48 @@ bool RG_ProcessRiskFreeTicket(int ticket)
             GetLastError()
          );
 
-
          return(false);
       }
 
-
-
       RG_MarkRiskFreeDone(ticket);
-
       return(true);
    }
-
-
 
    return(false);
 }
 
-
 //====================================================
-// Process All RiskFree
+// Process All Automatic RiskFree
 //====================================================
 
 void RG_ProcessRiskFree()
 {
-
    if(!UseRiskFree)
       return;
-
-
 
    for(int i=OrdersTotal()-1;
        i>=0;
        i--)
    {
-
       if(!OrderSelect(
          i,
          SELECT_BY_POS,
          MODE_TRADES))
          continue;
 
-
-
       if(OrderSymbol()!=Symbol())
          continue;
-
-
 
       if(OrderMagicNumber()!=MagicNumber)
          continue;
 
-
-
       if(!RG_RiskFree_IsMarketOrder())
          continue;
-
-
 
       RG_ProcessRiskFreeTicket(
          OrderTicket()
       );
-
    }
-
 }
-
-
 
 #endif

@@ -2,12 +2,13 @@
 #define __RG_TRADE_MQH__
 
 #include <RG_Settings.mqh>
+#include <RG_Runtime.mqh>
 #include <Trade/RG_PositionSizer.mqh>
 #include <Trade/RG_Broker.mqh>
 #include <Trade/RG_PositionManager.mqh>
 
 //====================================================
-// MODIFY ORDER
+// Modify Order
 //====================================================
 
 bool RG_ModifyOrder(
@@ -18,9 +19,7 @@ bool RG_ModifyOrder(
    if(ticket<=0)
       return(false);
 
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
       return(false);
 
    ResetLastError();
@@ -48,37 +47,38 @@ bool RG_ModifyOrder(
    return(true);
 }
 
-
 //====================================================
-// APPLY INITIAL PROTECTION
+// Apply Initial Protection
 //====================================================
 
-bool RG_ApplyInitialProtection(
-   int ticket)
+bool RG_ApplyInitialProtection(int ticket)
 {
    if(ticket<=0)
       return(false);
 
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
       return(false);
+
+   int runtimeSL=
+      RG_RuntimeStopLoss();
+
+   int runtimeTP=
+      RG_RuntimeTakeProfit();
 
    double sl=0;
    double tp=0;
 
-   //--------------------------------------------------
+   //-------------------------------------------------
    // BUY
-   //--------------------------------------------------
+   //-------------------------------------------------
 
    if(OrderType()==OP_BUY)
    {
-      if(UseStopLoss &&
-         StopLoss>0)
+      if(UseStopLoss && runtimeSL>0)
       {
          sl=
             OrderOpenPrice()-
-            StopLoss*RG_Point();
+            runtimeSL*RG_Point();
 
          sl=
             RG_CorrectBuySL(
@@ -87,29 +87,28 @@ bool RG_ApplyInitialProtection(
             );
       }
 
-      if(UseTakeProfit &&
-         TakeProfit>0)
+      if(UseTakeProfit && runtimeTP>0)
       {
          tp=
             OrderOpenPrice()+
-            TakeProfit*RG_Point();
+            runtimeTP*RG_Point();
+
+         tp=
+            RG_NormalizePrice(tp);
       }
    }
 
-
-   //--------------------------------------------------
+   //-------------------------------------------------
    // SELL
-   //--------------------------------------------------
+   //-------------------------------------------------
 
-   else
-   if(OrderType()==OP_SELL)
+   else if(OrderType()==OP_SELL)
    {
-      if(UseStopLoss &&
-         StopLoss>0)
+      if(UseStopLoss && runtimeSL>0)
       {
          sl=
             OrderOpenPrice()+
-            StopLoss*RG_Point();
+            runtimeSL*RG_Point();
 
          sl=
             RG_CorrectSellSL(
@@ -118,29 +117,27 @@ bool RG_ApplyInitialProtection(
             );
       }
 
-      if(UseTakeProfit &&
-         TakeProfit>0)
+      if(UseTakeProfit && runtimeTP>0)
       {
          tp=
             OrderOpenPrice()-
-            TakeProfit*RG_Point();
+            runtimeTP*RG_Point();
+
+         tp=
+            RG_NormalizePrice(tp);
       }
    }
-
    else
    {
       return(false);
    }
 
-
-   //--------------------------------------------------
+   //-------------------------------------------------
    // Nothing to modify
-   //--------------------------------------------------
+   //-------------------------------------------------
 
-   if(sl<=0 &&
-      tp<=0)
+   if(sl<=0 && tp<=0)
       return(true);
-
 
    return(
       RG_ModifyOrder(
@@ -150,7 +147,6 @@ bool RG_ApplyInitialProtection(
       )
    );
 }
-
 
 //====================================================
 // BUY
@@ -169,7 +165,6 @@ int RG_SendBuyOrder()
    if(!RG_CheckVolumeLimit(lot))
       return(-1);
 
-
    ResetLastError();
 
    int ticket=
@@ -182,11 +177,10 @@ int RG_SendBuyOrder()
          0,
          0,
          "RiskGuard BUY",
-         0,
+         MagicNumber,
          0,
          clrLime
       );
-
 
    if(ticket<0)
    {
@@ -198,9 +192,7 @@ int RG_SendBuyOrder()
       return(-1);
    }
 
-
    Sleep(500);
-
 
    if(!RG_ApplyInitialProtection(ticket))
    {
@@ -210,10 +202,8 @@ int RG_SendBuyOrder()
       );
    }
 
-
    return(ticket);
 }
-
 
 //====================================================
 // SELL
@@ -232,7 +222,6 @@ int RG_SendSellOrder()
    if(!RG_CheckVolumeLimit(lot))
       return(-1);
 
-
    ResetLastError();
 
    int ticket=
@@ -245,11 +234,10 @@ int RG_SendSellOrder()
          0,
          0,
          "RiskGuard SELL",
-         0,
+         MagicNumber,
          0,
          clrRed
       );
-
 
    if(ticket<0)
    {
@@ -261,9 +249,7 @@ int RG_SendSellOrder()
       return(-1);
    }
 
-
    Sleep(500);
-
 
    if(!RG_ApplyInitialProtection(ticket))
    {
@@ -273,32 +259,21 @@ int RG_SendSellOrder()
       );
    }
 
-
    return(ticket);
 }
 
-
 //====================================================
-// BUY SHORTCUT
+// Shortcuts
 //====================================================
 
 bool RG_Buy()
 {
-   return(
-      RG_SendBuyOrder()>0
-   );
+   return(RG_SendBuyOrder()>0);
 }
-
-
-//====================================================
-// SELL SHORTCUT
-//====================================================
 
 bool RG_Sell()
 {
-   return(
-      RG_SendSellOrder()>0
-   );
+   return(RG_SendSellOrder()>0);
 }
 
 #endif

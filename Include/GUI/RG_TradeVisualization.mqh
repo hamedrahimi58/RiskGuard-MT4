@@ -2,107 +2,49 @@
 #define __RG_TRADE_VISUALIZATION_MQH__
 
 #include <RG_Settings.mqh>
-#include <Core/RG_Defines.mqh>
-#include <Trade/RG_TakeProfit.mqh>
-
+#include <RG_Runtime.mqh>
+#include <GUI/RG_Edit.mqh>
 
 //====================================================
 // RiskGuard MT4
-// SINGLE TP VISUALIZATION V2
+// PRE-TRADE PREVIEW ONLY
 //
-// Entry  : White ray
-// SL     : Red dashed ray
-// TP     : Green dashed movable ray
+// BUY / SELL creates one frozen preview.
+// SET clears it after successful market execution.
+// CANCEL clears it without trading.
 //
-// Cleanup:
-// - Remove stale objects
-// - Remove old ticket objects
-// - Keep only active trades
+// This module never writes broker SL / TP levels.
+// Native MT4 trade levels own the live position.
 //====================================================
-
 
 #define RG_TV_PREFIX "RGTV_"
 #define RG_TV_FONT   "Arial"
 
+#define RG_TV_BUY_ENTRY  RG_TV_PREFIX+"PREVIEW_BUY_ENTRY"
+#define RG_TV_BUY_SL     RG_TV_PREFIX+"PREVIEW_BUY_SL"
+#define RG_TV_BUY_TP     RG_TV_PREFIX+"PREVIEW_BUY_TP"
 
-#define RG_TV_ENTRY       "ENTRY_"
-#define RG_TV_SL          "SL_"
-#define RG_TV_TP          "FINALTP_"
+#define RG_TV_SELL_ENTRY RG_TV_PREFIX+"PREVIEW_SELL_ENTRY"
+#define RG_TV_SELL_SL    RG_TV_PREFIX+"PREVIEW_SELL_SL"
+#define RG_TV_SELL_TP    RG_TV_PREFIX+"PREVIEW_SELL_TP"
 
-#define RG_TV_ENTRY_LABEL "ENTRY_LABEL_"
-#define RG_TV_SL_LABEL    "SL_LABEL_"
-#define RG_TV_TP_LABEL    "FINALTP_LABEL_"
+#define RG_TV_BUY_ENTRY_LABEL  RG_TV_PREFIX+"LABEL_BUY_ENTRY"
+#define RG_TV_BUY_SL_LABEL     RG_TV_PREFIX+"LABEL_BUY_SL"
+#define RG_TV_BUY_TP_LABEL     RG_TV_PREFIX+"LABEL_BUY_TP"
 
+#define RG_TV_SELL_ENTRY_LABEL RG_TV_PREFIX+"LABEL_SELL_ENTRY"
+#define RG_TV_SELL_SL_LABEL    RG_TV_PREFIX+"LABEL_SELL_SL"
+#define RG_TV_SELL_TP_LABEL    RG_TV_PREFIX+"LABEL_SELL_TP"
 
+#define RG_TV_DECISION_LABEL   RG_TV_PREFIX+"DECISION"
 
-//====================================================
-// Object Names
-//====================================================
-
-string RG_TV_EntryName(int ticket)
-{
-   return(
-      RG_TV_PREFIX+
-      RG_TV_ENTRY+
-      IntegerToString(ticket)
-   );
-}
-
-
-string RG_TV_SLName(int ticket)
-{
-   return(
-      RG_TV_PREFIX+
-      RG_TV_SL+
-      IntegerToString(ticket)
-   );
-}
-
-
-string RG_TV_TPName(int ticket)
-{
-   return(
-      RG_TV_PREFIX+
-      RG_TV_TP+
-      IntegerToString(ticket)
-   );
-}
-
-
-
-string RG_TV_EntryLabel(int ticket)
-{
-   return(
-      RG_TV_PREFIX+
-      RG_TV_ENTRY_LABEL+
-      IntegerToString(ticket)
-   );
-}
-
-
-string RG_TV_SLLabel(int ticket)
-{
-   return(
-      RG_TV_PREFIX+
-      RG_TV_SL_LABEL+
-      IntegerToString(ticket)
-   );
-}
-
-
-string RG_TV_TPLabel(int ticket)
-{
-   return(
-      RG_TV_PREFIX+
-      RG_TV_TP_LABEL+
-      IntegerToString(ticket)
-   );
-}
-
-
+int    g_RG_TV_LastDirection=-1;
+double g_RG_TV_LastEntry=0.0;
+double g_RG_TV_LastSL=0.0;
+double g_RG_TV_LastTP=0.0;
 
 //====================================================
-// Delete Object
+// Delete
 //====================================================
 
 void RG_TV_DeleteObject(string name)
@@ -111,829 +53,444 @@ void RG_TV_DeleteObject(string name)
       ObjectDelete(0,name);
 }
 
-
-
-//====================================================
-// Delete Ticket Objects
-//====================================================
-
-void RG_TV_DeleteTicketObjects(int ticket)
+void RG_TV_DeleteTradeVisualization()
 {
+   for(int i=ObjectsTotal()-1;i>=0;i--)
+   {
+      string name=ObjectName(i);
 
-   if(ticket<=0)
-      return;
+      if(StringFind(name,RG_TV_PREFIX,0)==0)
+         ObjectDelete(0,name);
+   }
 
+   g_RG_TV_LastDirection=-1;
+   g_RG_TV_LastEntry=0.0;
+   g_RG_TV_LastSL=0.0;
+   g_RG_TV_LastTP=0.0;
 
-   RG_TV_DeleteObject(
-      RG_TV_EntryName(ticket));
-
-
-   RG_TV_DeleteObject(
-      RG_TV_SLName(ticket));
-
-
-   RG_TV_DeleteObject(
-      RG_TV_TPName(ticket));
-
-
-   RG_TV_DeleteObject(
-      RG_TV_EntryLabel(ticket));
-
-
-   RG_TV_DeleteObject(
-      RG_TV_SLLabel(ticket));
-
-
-   RG_TV_DeleteObject(
-      RG_TV_TPLabel(ticket));
+   ChartRedraw();
 }
 
-
-
 //====================================================
-// Current Time
+// Preview line
 //====================================================
 
-datetime RG_TV_CurrentTime()
+bool RG_TV_CreateLine(
+   string name,
+   double price,
+   color lineColor,
+   ENUM_LINE_STYLE lineStyle)
+{
+   if(price<=0)
+      return(false);
+
+   datetime t=TimeCurrent();
+
+   if(t<=0)
+      t=TimeLocal();
+
+   datetime t2=
+      t+PeriodSeconds()*20;
+
+   if(t2<=t)
+      t2=t+3600;
+
+   if(ObjectFind(0,name)<0)
+   {
+      if(!ObjectCreate(
+         0,name,OBJ_TREND,0,
+         t,price,t2,price))
+         return(false);
+   }
+   else
+   {
+      ObjectMove(0,name,0,t,price);
+      ObjectMove(0,name,1,t2,price);
+   }
+
+   ObjectSetInteger(0,name,OBJPROP_COLOR,lineColor);
+   ObjectSetInteger(0,name,OBJPROP_STYLE,lineStyle);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
+   ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,true);
+
+   // Preview is visual only and is not selectable.
+   ObjectSetInteger(0,name,OBJPROP_BACK,true);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+
+   return(true);
+}
+
+//====================================================
+// Preview text
+//====================================================
+
+bool RG_TV_CreateText(
+   string name,
+   string text,
+   double price,
+   color textColor)
 {
    datetime t=TimeCurrent();
 
    if(t<=0)
       t=TimeLocal();
 
-   return(t);
-}
-
-
-
-//====================================================
-// Create Line
-//====================================================
-
-bool RG_TV_CreateLine(
-   string name,
-   datetime t1,
-   datetime t2,
-   double price,
-   color clr,
-   ENUM_LINE_STYLE style,
-   int width,
-   bool selectable
-)
-{
-
-   if(price<=0)
-      return(false);
-
-
    if(ObjectFind(0,name)<0)
    {
-
       if(!ObjectCreate(
-         0,
-         name,
-         OBJ_TREND,
-         0,
-         t1,
-         price,
-         t2,
-         price))
-      {
+         0,name,OBJ_TEXT,0,t,price))
          return(false);
-      }
-
    }
    else
    {
-
-      ObjectMove(
-         0,
-         name,
-         0,
-         t1,
-         price);
-
-
-      ObjectMove(
-         0,
-         name,
-         1,
-         t2,
-         price);
+      ObjectMove(0,name,0,t,price);
    }
 
+   ObjectSetString(
+      0,name,OBJPROP_TEXT,text);
 
-
-   ObjectSetInteger(
-      0,
-      name,
-      OBJPROP_COLOR,
-      clr);
-
-
+   ObjectSetString(
+      0,name,OBJPROP_FONT,RG_TV_FONT);
 
    ObjectSetInteger(
-      0,
-      name,
-      OBJPROP_STYLE,
-      style);
-
-
+      0,name,OBJPROP_FONTSIZE,8);
 
    ObjectSetInteger(
-      0,
-      name,
-      OBJPROP_WIDTH,
-      width);
-
-
-
-   // Extend line to chart edge
-   ObjectSetInteger(
-      0,
-      name,
-      OBJPROP_RAY_RIGHT,
-      true);
-
-
+      0,name,OBJPROP_COLOR,textColor);
 
    ObjectSetInteger(
-      0,
-      name,
-      OBJPROP_BACK,
-      false);
-
-
+      0,name,OBJPROP_ANCHOR,ANCHOR_LEFT);
 
    ObjectSetInteger(
-      0,
-      name,
-      OBJPROP_SELECTABLE,
-      selectable);
-
-
+      0,name,OBJPROP_SELECTABLE,false);
 
    ObjectSetInteger(
-      0,
-      name,
-      OBJPROP_HIDDEN,
-      false);
+      0,name,OBJPROP_SELECTED,false);
 
+   ObjectSetInteger(
+      0,name,OBJPROP_HIDDEN,true);
 
+   ObjectSetInteger(
+      0,name,OBJPROP_BACK,true);
 
    return(true);
 }
 
-
-
 //====================================================
-// Create Text
+// Draw ONE selected preview
 //====================================================
 
-bool RG_TV_CreateText(
-   string name,
-   string text,
-   color clr
-)
+void RG_TV_DrawPreviewSet(
+   string prefix,
+   double entry,
+   double sl,
+   double tp,
+   string side)
 {
-
-   if(ObjectFind(0,name)<0)
-   {
-
-      if(!ObjectCreate(
-         0,
-         name,
-         OBJ_TEXT,
-         0,
-         0,
-         0))
-      {
-         return(false);
-      }
-   }
-
-
-
-   ObjectSetString(
-      0,
-      name,
-      OBJPROP_TEXT,
-      text);
-
-
-
-   ObjectSetString(
-      0,
-      name,
-      OBJPROP_FONT,
-      RG_TV_FONT);
-
-
-
-   ObjectSetInteger(
-      0,
-      name,
-      OBJPROP_FONTSIZE,
-      9);
-
-
-
-   ObjectSetInteger(
-      0,
-      name,
-      OBJPROP_COLOR,
-      clr);
-
-
-
-   ObjectSetInteger(
-      0,
-      name,
-      OBJPROP_ANCHOR,
-      ANCHOR_LEFT);
-
-
-
-   ObjectSetInteger(
-      0,
-      name,
-      OBJPROP_SELECTABLE,
-      false);
-
-
-
-   return(true);
-}
-
-
-
-//====================================================
-// Move Label
-//====================================================
-
-void RG_TV_MoveText(
-   string name,
-   datetime t,
-   double price
-)
-{
-
-   if(ObjectFind(0,name)<0)
+   if(entry<=0)
       return;
 
+   int digits=
+      (int)MarketInfo(Symbol(),MODE_DIGITS);
 
-   ObjectMove(
-      0,
-      name,
-      0,
-      t,
-      price);
+   entry=NormalizeDouble(entry,digits);
+
+   if(sl>0)
+      sl=NormalizeDouble(sl,digits);
+
+   if(tp>0)
+      tp=NormalizeDouble(tp,digits);
+
+   string e=prefix+"_ENTRY";
+   string s=prefix+"_SL";
+   string t=prefix+"_TP";
+
+   string el=e+"_LABEL";
+   string sln=s+"_LABEL";
+   string tl=t+"_LABEL";
+
+   RG_TV_CreateLine(
+      e,entry,clrWhite,STYLE_DOT);
+
+   RG_TV_CreateText(
+      el,
+      side+" ENTRY "+DoubleToString(entry,digits),
+      entry,
+      clrWhite
+   );
+
+   if(sl>0)
+   {
+      RG_TV_CreateLine(
+         s,sl,clrTomato,STYLE_DASH);
+
+      RG_TV_CreateText(
+         sln,
+         side+" SL "+DoubleToString(sl,digits),
+         sl,
+         clrTomato
+      );
+   }
+   else
+   {
+      RG_TV_DeleteObject(s);
+      RG_TV_DeleteObject(sln);
+   }
+
+   if(tp>0)
+   {
+      RG_TV_CreateLine(
+         t,tp,clrLime,STYLE_DASH);
+
+      RG_TV_CreateText(
+         tl,
+         side+" TP "+DoubleToString(tp,digits),
+         tp,
+         clrLime
+      );
+   }
+   else
+   {
+      RG_TV_DeleteObject(t);
+      RG_TV_DeleteObject(tl);
+   }
 }
-//====================================================
-// Money Calculation
-//====================================================
 
-double RG_TV_MoneyAtPrice(
-   int ticket,
-   double target,
-   double lots
-)
+double RG_TV_DollarPerPoint(double lot)
 {
-
-   if(ticket<=0 || target<=0 || lots<=0)
-      return(0);
-
-
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
-      return(0);
-
-
+   double point=
+      MarketInfo(Symbol(),MODE_POINT);
 
    double tickSize=
-      MarketInfo(
-         OrderSymbol(),
-         MODE_TICKSIZE);
-
-
+      MarketInfo(Symbol(),MODE_TICKSIZE);
 
    double tickValue=
-      MarketInfo(
-         OrderSymbol(),
-         MODE_TICKVALUE);
+      MarketInfo(Symbol(),MODE_TICKVALUE);
 
-
-
-   if(tickSize<=0 || tickValue<=0)
+   if(point<=0 ||
+      tickSize<=0 ||
+      tickValue<=0 ||
+      lot<=0)
       return(0);
 
-
-
-   double diff=0;
-
-
-
-   if(OrderType()==OP_BUY)
-      diff=target-OrderOpenPrice();
-
-
-
-   if(OrderType()==OP_SELL)
-      diff=OrderOpenPrice()-target;
-
-
-
    return(
-      (diff/tickSize)*
+      lot*
       tickValue*
-      lots
+      (point/tickSize)
    );
 }
 
-
-
-//====================================================
-// Draw Entry
-//====================================================
-
-void RG_TV_DrawEntry(
-   int ticket,
-   datetime t1,
-   datetime t2
-)
+void RG_TV_DrawDecision(
+   double entry,
+   double sl,
+   double tp,
+   double lot,
+   int direction,
+   int digits)
 {
+   RG_TV_DeleteObject(RG_TV_DECISION_LABEL);
 
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
+   if(entry<=0 ||
+      lot<=0)
       return;
 
+   double dpp=
+      RG_TV_DollarPerPoint(lot);
 
+   if(dpp<=0)
+      return;
 
-   double price=
-      OrderOpenPrice();
+   double risk=0.0;
+   double reward=0.0;
 
+   if(UseStopLoss && sl>0)
+      risk=
+         MathAbs(entry-sl)/Point*dpp;
 
+   if(UseTakeProfit && tp>0)
+      reward=
+         MathAbs(tp-entry)/Point*dpp;
 
-   RG_TV_CreateLine(
-      RG_TV_EntryName(ticket),
-      t1,
-      t2,
-      price,
-      clrWhite,
-      STYLE_SOLID,
-      2,
-      false);
+   string text=
+      (direction==OP_BUY?"BUY":"SELL")+
+      "  Risk $"+
+      DoubleToString(risk,2)+
+      "  Reward $"+
+      DoubleToString(reward,2);
 
+   if(risk>0 && reward>0)
+   {
+      double rr=reward/risk;
 
+      text+=
+         "  R:R 1:"+
+         DoubleToString(rr,2);
+   }
 
-   string side="BUY";
+   double decisionPrice=entry;
 
-
-   if(OrderType()==OP_SELL)
-      side="SELL";
-
-
-
-   string txt=
-      side+
-      " ENTRY "+
-      DoubleToString(price,Digits);
-
-
+   if(sl>0 && tp>0)
+      decisionPrice=(sl+tp)/2.0;
+   else
+   if(sl>0)
+      decisionPrice=sl;
+   else
+   if(tp>0)
+      decisionPrice=tp;
 
    RG_TV_CreateText(
-      RG_TV_EntryLabel(ticket),
-      txt,
-      clrWhite);
-
-
-
-   RG_TV_MoveText(
-      RG_TV_EntryLabel(ticket),
-      t2,
-      price);
+      RG_TV_DECISION_LABEL,
+      text,
+      decisionPrice,
+      clrGold
+   );
 }
 
-
-
 //====================================================
-// Draw SL
+// Check whether redraw is actually required
 //====================================================
 
-void RG_TV_DrawSL(
-   int ticket,
-   datetime t1,
-   datetime t2
-)
+bool RG_TV_ObjectsExist(int direction)
 {
-
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
-      return;
-
-
-
-   double price=
-      OrderStopLoss();
-
-
-
-   if(price<=0)
+   if(direction==OP_BUY)
    {
+      return(
+         ObjectFind(0,RG_TV_BUY_ENTRY)>=0 &&
+         ObjectFind(0,RG_TV_BUY_ENTRY_LABEL)>=0
+      );
+   }
 
-      RG_TV_DeleteObject(
-         RG_TV_SLName(ticket));
+   if(direction==OP_SELL)
+   {
+      return(
+         ObjectFind(0,RG_TV_SELL_ENTRY)>=0 &&
+         ObjectFind(0,RG_TV_SELL_ENTRY_LABEL)>=0
+      );
+   }
 
-      RG_TV_DeleteObject(
-         RG_TV_SLLabel(ticket));
+   return(false);
+}
 
+//====================================================
+// Show selected preview
+//
+// IMPORTANT:
+// No RefreshRates() and no current Ask/Bid calculation.
+// Preview prices come exclusively from Runtime snapshot.
+//====================================================
+
+void RG_TV_ShowPreview(int direction)
+{
+   if(!RG_RuntimePreviewActive())
+   {
+      RG_TV_DeleteTradeVisualization();
       return;
    }
 
-
-
-   RG_TV_CreateLine(
-      RG_TV_SLName(ticket),
-      t1,
-      t2,
-      price,
-      clrRed,
-      STYLE_DASH,
-      2,
-      false);
-
-
-
-   string txt=
-      "SL "+
-      DoubleToString(price,Digits);
-
-
-
-   RG_TV_CreateText(
-      RG_TV_SLLabel(ticket),
-      txt,
-      clrRed);
-
-
-
-   RG_TV_MoveText(
-      RG_TV_SLLabel(ticket),
-      t2,
-      price);
-}
-
-
-
-//====================================================
-// Draw Final TP
-//====================================================
-
-void RG_TV_DrawFinalTP(
-   int ticket,
-   datetime t1,
-   datetime t2
-)
-{
-
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
+   if(direction!=OP_BUY &&
+      direction!=OP_SELL)
+   {
+      RG_TV_DeleteTradeVisualization();
       return;
+   }
 
+   double entry=
+      RG_RuntimePreviewEntry();
 
+   double sl=
+      RG_RuntimePreviewSL();
 
    double tp=
-      RG_GetTPLevelPrice(ticket);
+      RG_RuntimePreviewTP();
 
+   if(entry<=0)
+      return;
 
-
-   if(tp<=0)
+   if(direction==g_RG_TV_LastDirection &&
+      MathAbs(entry-g_RG_TV_LastEntry)<Point/2.0 &&
+      MathAbs(sl-g_RG_TV_LastSL)<Point/2.0 &&
+      MathAbs(tp-g_RG_TV_LastTP)<Point/2.0 &&
+      RG_TV_ObjectsExist(direction))
    {
-
-      RG_TV_DeleteObject(
-         RG_TV_TPName(ticket));
-
-      RG_TV_DeleteObject(
-         RG_TV_TPLabel(ticket));
-
       return;
    }
 
+   RG_TV_DeleteTradeVisualization();
 
-
-   RG_TV_CreateLine(
-      RG_TV_TPName(ticket),
-      t1,
-      t2,
-      tp,
-      clrLime,
-      STYLE_DASH,
-      2,
-      true);
-
-
-
-   string txt=
-      "FINAL TP "+
-      DoubleToString(tp,Digits);
-
-
-
-   RG_TV_CreateText(
-      RG_TV_TPLabel(ticket),
-      txt,
-      clrLime);
-
-
-
-   RG_TV_MoveText(
-      RG_TV_TPLabel(ticket),
-      t2,
-      tp);
-}
-
-
-
-//====================================================
-// Draw Position
-//====================================================
-
-void RG_TV_DrawPosition(
-   int ticket
-)
-{
-
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
-      return;
-
-
-
-   if(OrderSymbol()!=Symbol())
-      return;
-
-
-
-   if(OrderMagicNumber()!=MagicNumber)
-      return;
-
-
-
-   datetime t1=
-      OrderOpenTime();
-
-
-
-   datetime t2=
-      RG_TV_CurrentTime();
-
-
-
-   RG_TV_DrawEntry(
-      ticket,
-      t1,
-      t2);
-
-
-
-   RG_TV_DrawSL(
-      ticket,
-      t1,
-      t2);
-
-
-
-   RG_TV_DrawFinalTP(
-      ticket,
-      t1,
-      t2);
-}
-
-
-
-//====================================================
-// Remove Old Objects
-//====================================================
-
-void RG_TV_RemoveStaleObjects()
-{
-
-   for(int i=ObjectsTotal()-1;
-       i>=0;
-       i--)
+   if(direction==OP_BUY)
    {
-
-      string name=
-         ObjectName(i);
-
-
-
-      if(StringFind(
-         name,
-         RG_TV_PREFIX,
-         0)!=0)
-         continue;
-
-
-
-      bool found=false;
-
-
-
-      for(int j=OrdersTotal()-1;
-          j>=0;
-          j--)
-      {
-
-         if(!OrderSelect(
-            j,
-            SELECT_BY_POS,
-            MODE_TRADES))
-            continue;
-
-
-
-         if(OrderSymbol()!=Symbol())
-            continue;
-
-
-
-         if(OrderMagicNumber()!=MagicNumber)
-            continue;
-
-
-
-         string tk=
-            IntegerToString(
-               OrderTicket());
-
-
-
-         if(StringFind(
-            name,
-            tk,
-            0)>=0)
-         {
-            found=true;
-            break;
-         }
-      }
-
-
-
-      if(!found)
-      {
-         ObjectDelete(
-            0,
-            name);
-      }
+      RG_TV_DrawPreviewSet(
+         RG_TV_PREFIX+"BUY",
+         entry,sl,tp,"BUY"
+      );
    }
+   else
+   {
+      RG_TV_DrawPreviewSet(
+         RG_TV_PREFIX+"SELL",
+         entry,sl,tp,"SELL"
+      );
+   }
+
+   double lots=
+      StrToDouble(
+         RG_GetEditText("RG_LOT_INPUT")
+      );
+
+   if(lots<=0)
+      lots=RG_RuntimeFixedLot();
+
+   int digits=
+      (int)MarketInfo(Symbol(),MODE_DIGITS);
+
+   RG_TV_DrawDecision(
+      entry,sl,tp,lots,
+      direction,digits
+   );
+
+   g_RG_TV_LastDirection=direction;
+   g_RG_TV_LastEntry=entry;
+   g_RG_TV_LastSL=sl;
+   g_RG_TV_LastTP=tp;
+
+   ChartRedraw();
 }
 
-
-
 //====================================================
-// Process Visualization
+// Tick / timer compatibility
 //====================================================
 
 void RG_ProcessTradeVisualization()
 {
-
-   for(int i=OrdersTotal()-1;
-       i>=0;
-       i--)
+   if(!RG_RuntimePreviewActive())
    {
+      if(g_RG_TV_LastDirection!=-1)
+         RG_TV_DeleteTradeVisualization();
 
-      if(!OrderSelect(
-         i,
-         SELECT_BY_POS,
-         MODE_TRADES))
-         continue;
-
-
-
-      if(OrderSymbol()!=Symbol())
-         continue;
-
-
-
-      if(OrderMagicNumber()!=MagicNumber)
-         continue;
-
-
-
-      if(OrderType()!=OP_BUY &&
-         OrderType()!=OP_SELL)
-         continue;
-
-
-
-      RG_TV_DrawPosition(
-         OrderTicket());
+      return;
    }
 
+   int direction=
+      RG_RuntimePreviewDirection();
 
-
-   RG_TV_RemoveStaleObjects();
-
-
-   ChartRedraw();
-}
-
-
-
-//====================================================
-// Delete All
-//====================================================
-
-void RG_DeleteTradeVisualization()
-{
-
-   for(int i=ObjectsTotal()-1;
-       i>=0;
-       i--)
+   if(direction!=OP_BUY &&
+      direction!=OP_SELL)
    {
-
-      string name=
-         ObjectName(i);
-
-
-
-      if(StringFind(
-         name,
-         RG_TV_PREFIX,
-         0)==0)
-      {
-
-         ObjectDelete(
-            0,
-            name);
-      }
+      RG_TV_DeleteTradeVisualization();
+      return;
    }
 
-
-   ChartRedraw();
+   // Rendering is based on frozen Runtime values.
+   RG_TV_ShowPreview(direction);
 }
 
-
-
-//====================================================
-// Handle TP Drag
-//====================================================
-
-bool RG_TV_HandleTPDrag(
-   string objectName
-)
+// No custom TP / SL drag.
+// Native MT4 owns live order level movement.
+bool RG_TV_HandleTPDrag(string objectName)
 {
-
-   if(StringFind(
-      objectName,
-      RG_TV_TP,
-      0)<0)
-      return(false);
-
-
-
-   int ticket=
-      (int)StringToInteger(
-         StringSubstr(
-            objectName,
-            StringLen(
-               RG_TV_PREFIX+
-               RG_TV_TP)));
-
-
-
-   if(ticket<=0)
-      return(false);
-
-
-
-   double price=
-      ObjectGetDouble(
-         0,
-         objectName,
-         OBJPROP_PRICE1);
-
-
-
-   if(price<=0)
-      return(false);
-
-
-
-   return(
-      RG_SetManualTPPrice(
-         ticket,
-         price)
-   );
+   return(false);
 }
-
-
 
 #endif

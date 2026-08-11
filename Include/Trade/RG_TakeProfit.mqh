@@ -7,40 +7,26 @@
 // RiskGuard MT4
 // SINGLE FINAL TAKE PROFIT
 //
-// - One final TP
-// - Full position close
-// - No partial close
-// - No Multi TP
-// - Manual TP supported
+// Existing broker TP is authoritative after order open.
+// RiskGuard will create/sync a TP only when the order has
+// no broker TP yet. This preserves manual MT4 dragging.
 //====================================================
 
 #define RG_TP_PREFIX "RGTP_"
 
-//====================================================
-// Keys
-//====================================================
-
 string RG_TP_ManualKey(int ticket)
 {
    return(
-      RG_TP_PREFIX+
-      "MANUAL_"+
-      IntegerToString(ticket)
+      RG_TP_PREFIX+"MANUAL_"+IntegerToString(ticket)
    );
 }
 
 string RG_TP_DoneKey(int ticket)
 {
    return(
-      RG_TP_PREFIX+
-      "DONE_"+
-      IntegerToString(ticket)
+      RG_TP_PREFIX+"DONE_"+IntegerToString(ticket)
    );
 }
-
-//====================================================
-// Clear State
-//====================================================
 
 void RG_ClearTPState(int ticket)
 {
@@ -58,10 +44,6 @@ void RG_ClearTPState(int ticket)
       GlobalVariableDel(key);
 }
 
-//====================================================
-// Manual TP Exists
-//====================================================
-
 bool RG_TPManualExists(int ticket)
 {
    if(ticket<=0)
@@ -73,10 +55,6 @@ bool RG_TPManualExists(int ticket)
       )
    );
 }
-
-//====================================================
-// Get Manual TP
-//====================================================
 
 double RG_GetManualTPPrice(int ticket)
 {
@@ -91,160 +69,83 @@ double RG_GetManualTPPrice(int ticket)
    if(price<=0)
       return(0);
 
-   return(
-      NormalizeDouble(
-         price,
-         Digits
-      )
-   );
+   return(NormalizeDouble(price,Digits));
 }
 
-//====================================================
-// Validate Manual TP
-//====================================================
-
-bool RG_IsValidManualTP(
-   int ticket,
-   double price)
+bool RG_IsValidManualTP(int ticket,double price)
 {
    if(ticket<=0 || price<=0)
       return(false);
 
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
       return(false);
 
    if(OrderType()==OP_BUY)
-      return(
-         price>OrderOpenPrice()
-      );
+      return(price>OrderOpenPrice());
 
    if(OrderType()==OP_SELL)
-      return(
-         price<OrderOpenPrice()
-      );
+      return(price<OrderOpenPrice());
 
    return(false);
 }
 
-//====================================================
-// Set Manual TP
-//====================================================
-
-bool RG_SetManualTPPrice(
-   int ticket,
-   double price)
+bool RG_SetManualTPPrice(int ticket,double price)
 {
-   if(ticket<=0 || price<=0)
-      return(false);
-
-   if(!RG_IsValidManualTP(
-      ticket,
-      price))
+   if(!RG_IsValidManualTP(ticket,price))
       return(false);
 
    GlobalVariableSet(
       RG_TP_ManualKey(ticket),
-      NormalizeDouble(
-         price,
-         Digits
-      )
+      NormalizeDouble(price,Digits)
    );
 
    return(true);
 }
-
-//====================================================
-// Get Active Final TP
-//====================================================
 
 double RG_GetTPLevelPrice(int ticket)
 {
    if(ticket<=0)
       return(0);
 
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
       return(0);
 
-   //--------------------------------------------------
-   // Manual chart TP has priority
-   //--------------------------------------------------
-
-   double manual=
-      RG_GetManualTPPrice(ticket);
+   // Manual RiskGuard TP state, if any, has priority.
+   double manual=RG_GetManualTPPrice(ticket);
 
    if(manual>0 &&
-      RG_IsValidManualTP(
-         ticket,
-         manual))
-   {
+      RG_IsValidManualTP(ticket,manual))
       return(manual);
-   }
 
-   //--------------------------------------------------
-   // Default single TP
-   //--------------------------------------------------
-
-   if(!UseTakeProfit)
-      return(0);
-
-   if(TakeProfit<=0)
+   if(!UseTakeProfit ||
+      TakeProfit<=0)
       return(0);
 
    double price=0;
 
    if(OrderType()==OP_BUY)
-   {
-      price=
-         OrderOpenPrice()+
-         TakeProfit*Point;
-   }
+      price=OrderOpenPrice()+TakeProfit*Point;
    else
    if(OrderType()==OP_SELL)
-   {
-      price=
-         OrderOpenPrice()-
-         TakeProfit*Point;
-   }
+      price=OrderOpenPrice()-TakeProfit*Point;
    else
-   {
       return(0);
-   }
 
-   return(
-      NormalizeDouble(
-         price,
-         Digits
-      )
-   );
+   return(NormalizeDouble(price,Digits));
 }
-
-//====================================================
-// TP State
-//====================================================
 
 bool RG_TPStateExists(int ticket)
 {
    if(ticket<=0)
       return(false);
 
-   string key=
-      RG_TP_DoneKey(ticket);
+   string key=RG_TP_DoneKey(ticket);
 
    if(!GlobalVariableCheck(key))
       return(false);
 
-   return(
-      GlobalVariableGet(key)>0
-   );
+   return(GlobalVariableGet(key)>0);
 }
-
-//====================================================
-// Mark TP Done
-//====================================================
 
 void RG_MarkTPDone(int ticket)
 {
@@ -257,10 +158,6 @@ void RG_MarkTPDone(int ticket)
    );
 }
 
-//====================================================
-// TP Reached
-//====================================================
-
 bool RG_IsTPReached(int ticket)
 {
    if(ticket<=0)
@@ -269,13 +166,10 @@ bool RG_IsTPReached(int ticket)
    if(RG_TPStateExists(ticket))
       return(false);
 
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
       return(false);
 
-   double target=
-      RG_GetTPLevelPrice(ticket);
+   double target=RG_GetTPLevelPrice(ticket);
 
    if(target<=0)
       return(false);
@@ -291,41 +185,27 @@ bool RG_IsTPReached(int ticket)
    return(false);
 }
 
-//====================================================
-// Full Position Close
-//====================================================
-
 bool RG_CloseAtTakeProfit(int ticket)
 {
    if(ticket<=0)
       return(false);
 
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
       return(false);
 
    if(OrderType()!=OP_BUY &&
       OrderType()!=OP_SELL)
       return(false);
 
-   double lots=
-      OrderLots();
+   double lots=OrderLots();
 
    if(lots<=0)
       return(false);
 
    RefreshRates();
 
-   double price=0;
-
-   if(OrderType()==OP_BUY)
-      price=Bid;
-   else
-      price=Ask;
-
-   // MT4 OrderClose slippage
-   int slippage=3;
+   double price=
+      (OrderType()==OP_BUY ? Bid : Ask);
 
    ResetLastError();
 
@@ -334,7 +214,7 @@ bool RG_CloseAtTakeProfit(int ticket)
          ticket,
          lots,
          price,
-         slippage,
+         3,
          clrNONE
       );
 
@@ -351,12 +231,15 @@ bool RG_CloseAtTakeProfit(int ticket)
    }
 
    RG_MarkTPDone(ticket);
-
    return(true);
 }
 
 //====================================================
-// Synchronize Broker TP
+// Synchronize broker TP
+//
+// IMPORTANT:
+// Never overwrite an existing broker TP.
+// This is what allows manual MT4 dragging to persist.
 //====================================================
 
 bool RG_SyncBrokerTP(int ticket)
@@ -364,30 +247,20 @@ bool RG_SyncBrokerTP(int ticket)
    if(ticket<=0)
       return(false);
 
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
       return(false);
 
-   double target=
-      RG_GetTPLevelPrice(ticket);
+   double target=RG_GetTPLevelPrice(ticket);
 
    if(target<=0)
       return(false);
 
-   //--------------------------------------------------
-   // Manual TP is managed by RiskGuard.
-   // Do not overwrite broker TP here.
-   //--------------------------------------------------
-
-   if(RG_TPManualExists(ticket))
+   // Existing broker TP is authoritative.
+   if(OrderTakeProfit()>0)
       return(true);
 
    double stopLevel=
-      MarketInfo(
-         Symbol(),
-         MODE_STOPLEVEL
-      )*Point;
+      MarketInfo(Symbol(),MODE_STOPLEVEL)*Point;
 
    RefreshRates();
 
@@ -404,18 +277,11 @@ bool RG_SyncBrokerTP(int ticket)
       if(Ask-target<stopLevel)
          brokerOK=false;
    }
+   else
+      return(false);
 
    if(!brokerOK)
       return(false);
-
-   if(
-      MathAbs(
-         OrderTakeProfit()-target
-      )<=Point/2.0
-   )
-   {
-      return(true);
-   }
 
    ResetLastError();
 
@@ -444,10 +310,6 @@ bool RG_SyncBrokerTP(int ticket)
    return(true);
 }
 
-//====================================================
-// Process One Position
-//====================================================
-
 bool RG_ProcessTakeProfit(int ticket)
 {
    if(ticket<=0)
@@ -456,18 +318,14 @@ bool RG_ProcessTakeProfit(int ticket)
    if(!UseTakeProfit)
       return(false);
 
-   if(!OrderSelect(
-      ticket,
-      SELECT_BY_TICKET))
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
    {
       RG_ClearTPState(ticket);
       return(false);
    }
 
-   if(OrderSymbol()!=Symbol())
-      return(false);
-
-   if(OrderMagicNumber()!=MagicNumber)
+   if(OrderSymbol()!=Symbol() ||
+      OrderMagicNumber()!=MagicNumber)
       return(false);
 
    if(OrderType()!=OP_BUY &&
@@ -477,15 +335,8 @@ bool RG_ProcessTakeProfit(int ticket)
    if(RG_TPStateExists(ticket))
       return(false);
 
-   //--------------------------------------------------
-   // Keep broker-side final TP synchronized
-   //--------------------------------------------------
-
+   // Only creates a broker TP when none exists.
    RG_SyncBrokerTP(ticket);
-
-   //--------------------------------------------------
-   // Local TP execution
-   //--------------------------------------------------
 
    if(!RG_IsTPReached(ticket))
       return(false);
@@ -495,23 +346,14 @@ bool RG_ProcessTakeProfit(int ticket)
    );
 }
 
-//====================================================
-// Process All Positions
-//====================================================
-
 void RG_ProcessTakeProfits()
 {
    if(!UseTakeProfit)
       return;
 
-   for(int i=OrdersTotal()-1;
-       i>=0;
-       i--)
+   for(int i=OrdersTotal()-1;i>=0;i--)
    {
-      if(!OrderSelect(
-         i,
-         SELECT_BY_POS,
-         MODE_TRADES))
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_TRADES))
          continue;
 
       if(OrderSymbol()!=Symbol())
