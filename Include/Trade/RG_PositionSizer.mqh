@@ -178,6 +178,49 @@ double RG_GetVolume()
 
 
 //====================================================
+// Calculate Preview Lot from Risk Mode + SL distance
+//====================================================
+
+double RG_CalculatePreviewLot(
+   int orderType,
+   double entry,
+   double sl)
+{
+   if(entry<=0 || sl<=0) return(0);
+   if(orderType!=OP_BUY && orderType!=OP_SELL) return(0);
+
+   double distance=MathAbs(entry-sl);
+   double tickSize=MarketInfo(Symbol(),MODE_TICKSIZE);
+   double tickValue=MarketInfo(Symbol(),MODE_TICKVALUE);
+   if(distance<=0 || tickSize<=0 || tickValue<=0) return(0);
+
+   double riskMoney=0.0;
+   ENUM_RG_RISK_MODE mode=RG_RuntimeRiskMode();
+   double riskValue=RG_RuntimeRiskValue();
+
+   if(mode==RG_RISK_PERCENT)
+      riskMoney=AccountEquity()*(riskValue/100.0);
+   else if(mode==RG_RISK_DOLLAR)
+      riskMoney=riskValue;
+   else
+      return(RG_NormalizeLot(riskValue));
+
+   if(riskMoney<=0) return(0);
+
+   double moneyPerLot=(distance/tickSize)*tickValue;
+   if(moneyPerLot<=0) return(0);
+
+   double lot=riskMoney/moneyPerLot;
+   lot=RG_NormalizeLot(lot);
+
+   if(lot<=0) return(0);
+   if(MaxLot>0 && lot>MaxLot) lot=RG_NormalizeLot(MaxLot);
+
+   return(lot);
+}
+
+
+//====================================================
 // Calculate Stop Loss Price
 //
 // Returns:

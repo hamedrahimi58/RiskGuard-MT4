@@ -16,6 +16,8 @@
 //====================================================
 
 double g_RG_FixedLot   = 0.0;
+ENUM_RG_RISK_MODE g_RG_RiskMode = RG_RISK_LOT;
+double g_RG_RiskValue = 0.0;
 int    g_RG_StopLoss   = 0;
 int    g_RG_TakeProfit = 0;
 
@@ -44,6 +46,10 @@ void RG_RuntimeInit()
       return;
 
    g_RG_FixedLot   = FixedLot;
+   g_RG_RiskMode   = DefaultRiskMode;
+   g_RG_RiskValue  = (RiskValue>0.0 ? RiskValue : FixedLot);
+   if(g_RG_RiskMode==RG_RISK_LOT && g_RG_RiskValue<=0.0)
+      g_RG_RiskValue=FixedLot;
    g_RG_StopLoss   = StopLoss;
    g_RG_TakeProfit = TakeProfit;
 
@@ -58,6 +64,37 @@ void RG_RuntimeInit()
    g_RG_PreviewTP    = 0.0;
 
    g_RG_PreviewUsePips = false;
+}
+
+//====================================================
+// Risk mode / value
+//====================================================
+
+ENUM_RG_RISK_MODE RG_RuntimeRiskMode()
+{
+   RG_RuntimeInit();
+   return(g_RG_RiskMode);
+}
+
+void RG_RuntimeSetRiskMode(ENUM_RG_RISK_MODE mode)
+{
+   RG_RuntimeInit();
+   g_RG_RiskMode=mode;
+   if(mode==RG_RISK_LOT && g_RG_RiskValue<=0.0)
+      g_RG_RiskValue=FixedLot;
+}
+
+double RG_RuntimeRiskValue()
+{
+   RG_RuntimeInit();
+   return(g_RG_RiskValue);
+}
+
+void RG_RuntimeSetRiskValue(double value)
+{
+   RG_RuntimeInit();
+   if(value>0.0)
+      g_RG_RiskValue=value;
 }
 
 //====================================================

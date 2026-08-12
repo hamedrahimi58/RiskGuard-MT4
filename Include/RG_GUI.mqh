@@ -45,6 +45,12 @@
 #define RG_GUI_TRAILING       RG_PREFIX+"TRAILING"
 
 #define RG_GUI_RISK_INFO      RG_PREFIX+"RISK_INFO"
+#define RG_GUI_RISK_MINUS     RG_PREFIX+"RISK_MINUS"
+#define RG_GUI_RISK_VALUE     RG_PREFIX+"RISK_VALUE"
+#define RG_GUI_RISK_PLUS      RG_PREFIX+"RISK_PLUS"
+#define RG_GUI_RISK_PERCENT   RG_PREFIX+"RISK_PERCENT"
+#define RG_GUI_RISK_DOLLAR    RG_PREFIX+"RISK_DOLLAR"
+#define RG_GUI_RISK_LOT       RG_PREFIX+"RISK_LOT"
 #define RG_GUI_SECTION        RG_PREFIX+"OPEN_POSITIONS"
 #define RG_GUI_SECTION_TOGGLE RG_PREFIX+"OPEN_POSITIONS_TOGGLE"
 #define RG_GUI_SYMBOL         RG_PREFIX+"SYMBOL"
@@ -63,6 +69,8 @@
 #define RG_GUI_POS_TEXT       "TEXT_"
 #define RG_GUI_POS_BE         "BE_"
 #define RG_GUI_POS_RF         "RF_"
+#define RG_GUI_POS_THIRD      "THIRD_"
+#define RG_GUI_POS_HALF       "HALF_"
 #define RG_GUI_POS_CLOSE      "X_"
 
 #define RG_GUI_BG             C'25,25,25'
@@ -87,6 +95,7 @@
 
 #define RG_GUI_TITLE_SIZE     18
 #define RG_GUI_TEXT_SIZE      13
+#define RG_GUI_POSITION_TEXT_SIZE 10
 #define RG_GUI_STATUS_SIZE    12
 #define RG_GUI_STATUS_ROW_H    34
 #define RG_GUI_BUTTON_SIZE    12
@@ -105,24 +114,34 @@
 // Unified layout metrics.  The panel is deliberately built from these
 // measurements so controls cannot overlap when the position section
 // expands or collapses.
+#define RG_GUI_ROW_H              58
+#define RG_GUI_SECTION_H          42
+#define RG_GUI_FOOTER_H           42
+#define RG_GUI_MARKET_H           124
+
+// Risk + BUY/SELL/SET are now arranged sequentially.
+// Risk remains ONE single row.
+#define RG_GUI_RISK_H             52
+// Unified layout metrics.
+// Risk row comes first, then BUY / SELL / SET.
 #define RG_GUI_ROW_H          58
 #define RG_GUI_SECTION_H      42
 #define RG_GUI_FOOTER_H       42
 #define RG_GUI_MARKET_H       124
-#define RG_GUI_RISK_H         92
-#define RG_GUI_RISK_Y         414
-#define RG_GUI_POSITION_TOP   526
-#define RG_GUI_ROWS_START     518
-#define RG_GUI_PRIMARY_Y      100
-#define RG_GUI_FIELDS_Y       148
+
+#define RG_GUI_RISK_H         74
+#define RG_GUI_RISK_Y         0
+#define RG_GUI_POSITION_TOP   0
+#define RG_GUI_ROWS_START     0
+#define RG_GUI_PRIMARY_Y      0
+#define RG_GUI_FIELDS_Y      0
 #define RG_GUI_FIELD_STEP     52
-#define RG_GUI_MODE_Y         356
+#define RG_GUI_MODE_Y         0
 
 #define RG_GUI_Z_PANEL        50000
 #define RG_GUI_Z_HEADER       50010
 #define RG_GUI_Z_TEXT         50020
 #define RG_GUI_Z_BUTTON       50030
-
 int g_RG_GUI_LastChartWidth=0;
 bool g_RG_GUI_PositionsExpanded=true;
 bool g_RG_GUI_PanelExpanded=true;
@@ -154,6 +173,16 @@ string RG_GUI_PosBE(int ticket)
 string RG_GUI_PosRF(int ticket)
 {
    return(RG_GUI_PosName(RG_GUI_POS_RF,ticket));
+}
+
+string RG_GUI_PosThird(int ticket)
+{
+   return(RG_GUI_PosName(RG_GUI_POS_THIRD,ticket));
+}
+
+string RG_GUI_PosHalf(int ticket)
+{
+   return(RG_GUI_PosName(RG_GUI_POS_HALF,ticket));
 }
 
 string RG_GUI_PosClose(int ticket)
@@ -207,39 +236,110 @@ struct RGGuiLayout
 };
 
 void RG_GUI_CalculateLayout(
-   int x,
-   int y,
-   int w,
-   int rowCount,
-   bool positionsExpanded,
-   RGGuiLayout &L
+int x,
+int y,
+int w,
+int rowCount,
+bool positionsExpanded,
+RGGuiLayout &L
 )
 {
-   if(rowCount<1) rowCount=1;
-   if(rowCount>8) rowCount=8;
+   if(rowCount<1)
+      rowCount=1;
+
+   if(rowCount>8)
+      rowCount=8;
 
    L.contentW=w-(2*RG_GUI_PAD);
-   if(L.contentW<100) L.contentW=100;
 
-   L.statusY=y+RG_GUI_HEADER_H+3;
-   L.primaryY=L.statusY+RG_GUI_STATUS_ROW_H+6;
-   L.fieldsY=L.primaryY+RG_GUI_BUTTON_H+4;
-   L.fieldStep=RG_GUI_INPUT_H+10;
-   L.modeY=L.fieldsY+(L.fieldStep*4);
-   L.riskY=L.modeY+RG_GUI_INPUT_H+16;
-   L.positionY=L.riskY+RG_GUI_RISK_H+20;
-   L.rowsY=L.positionY+RG_GUI_SECTION_H+8;
-   L.rowsHeight=positionsExpanded ? rowCount*RG_GUI_ROW_H : 0;
-   L.marketY=L.rowsY+L.rowsHeight+10;
-   L.footerY=L.marketY+RG_GUI_MARKET_H+10;
-   L.panelH=(L.footerY-y)+RG_GUI_FOOTER_H;
+   if(L.contentW<100)
+      L.contentW=100;
 
-   L.actionGap=10;
-   L.actionX=x+RG_GUI_PAD;
-   L.actionW=(L.contentW-(2*L.actionGap))/3;
-   L.labelX=x+RG_GUI_PAD;
-   L.inputX=x+112;
-   L.rightX=x+w-RG_GUI_PAD-RG_GUI_SMALL_BUTTON_W;
+   //================================================
+   // Header / status
+   //================================================
+
+ L.statusY=
+   y+
+   RG_GUI_HEADER_H+
+   3;
+
+//====================================================
+// RISK ROW
+//
+// Risk + - + value + % $ Lot
+//====================================================
+
+L.riskY=
+   L.statusY+
+   RG_GUI_STATUS_ROW_H+
+   6;
+
+//====================================================
+// BUY / SELL / SET
+//====================================================
+
+L.primaryY=
+   L.riskY+
+   RG_GUI_RISK_H+
+   8;
+
+//====================================================
+// Utility actions
+//====================================================
+
+L.fieldsY=
+   L.primaryY+
+   RG_GUI_BUTTON_H+
+   10;
+
+L.modeY=L.fieldsY;
+
+L.actionGap=10;
+L.actionX=x+RG_GUI_PAD;
+L.actionW=
+   (L.contentW-(2*L.actionGap))/3;
+
+L.labelX=x+RG_GUI_PAD;
+L.inputX=x+RG_GUI_PAD;
+L.rightX=x+RG_GUI_PAD;
+
+L.positionY=
+   L.fieldsY+
+   RG_GUI_BUTTON_H+
+   10;
+
+   L.rowsY=
+      L.positionY+
+      RG_GUI_SECTION_H+
+      8;
+
+   L.rowsHeight=
+      positionsExpanded ?
+      rowCount*RG_GUI_ROW_H :
+      0;
+
+   //================================================
+   // Market information
+   //================================================
+
+   L.marketY=
+      L.rowsY+
+      L.rowsHeight+
+      10;
+
+   //================================================
+   // Footer
+   //================================================
+
+   L.footerY=
+      L.marketY+
+      RG_GUI_MARKET_H+
+      10;
+
+   L.panelH=
+      (L.footerY-y)+
+      RG_GUI_FOOTER_H;
 }
 
 //====================================================
@@ -250,6 +350,21 @@ void RG_GUI_DeleteObject(string name)
 {
    if(ObjectFind(0,name)>=0)
       ObjectDelete(0,name);
+}
+
+//====================================================
+// Enable editable preview fields
+//====================================================
+void RG_GUI_EnablePreviewEdit(string name)
+{
+   if(ObjectFind(0,name)<0)
+      return;
+
+   ObjectSetInteger(0,name,OBJPROP_READONLY,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,true);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,60000);
 }
 
 void RG_GUI_DeletePositionObjects()
@@ -563,15 +678,16 @@ void RG_GUI_DrawPositionRow(
       RG_GUI_PosText(ticket),
       line1,
       x+7,y+5,
-      pColor,RG_GUI_TEXT_SIZE,
+      pColor,RG_GUI_POSITION_TEXT_SIZE,
       RG_GUI_Z_TEXT
    );
 
-   int buttonW=58;
+   // Fast position actions: one click for BE / RF / 1/3 / 1/2 / X.
+   int buttonW=52;
    int buttonH=32;
-   int gap=7;
-   int total=(buttonW*3)+(gap*2);
-   int bx=x+width-total-12;
+   int gap=5;
+   int total=(buttonW*5)+(gap*4);
+   int bx=x+width-total-10;
    int by=y+13;
 
    RG_GUI_CreateButton(
@@ -585,16 +701,32 @@ void RG_GUI_DrawPositionRow(
    RG_GUI_CreateButton(
       RG_GUI_PosRF(ticket),
       "RF",
-      bx+buttonW+gap,by,buttonW,buttonH,
+      bx+((buttonW+gap)*1),by,buttonW,buttonH,
       RG_GUI_CYAN,clrBlack,
+      RG_GUI_Z_BUTTON
+   );
+
+   RG_GUI_CreateButton(
+      RG_GUI_PosThird(ticket),
+      "1/3",
+      bx+((buttonW+gap)*2),by,buttonW,buttonH,
+      RG_GUI_YELLOW,clrBlack,
+      RG_GUI_Z_BUTTON
+   );
+
+   RG_GUI_CreateButton(
+      RG_GUI_PosHalf(ticket),
+      "1/2",
+      bx+((buttonW+gap)*3),by,buttonW,buttonH,
+      RG_GUI_ORANGE,clrBlack,
       RG_GUI_Z_BUTTON
    );
 
    RG_GUI_CreateButton(
       RG_GUI_PosClose(ticket),
       "X",
-      bx+((buttonW+gap)*2),by,buttonW,buttonH,
-      RG_GUI_ORANGE,clrBlack,
+      bx+((buttonW+gap)*4),by,buttonW,buttonH,
+      RG_GUI_RED,clrWhite,
       RG_GUI_Z_BUTTON
    );
 }
@@ -1029,6 +1161,203 @@ void RG_GUI_ToggleProtectionMode()
 }
 
 //====================================================
+// Calculate Preview Lot from Risk mode
+//
+// %   = Account Balance * Risk %
+// $   = Fixed Dollar Risk
+// Lot = Configured Fixed Lot
+//
+// IMPORTANT:
+// This function NEVER changes Fixed Lot.
+//====================================================
+
+double RG_GUI_CalculateRiskLot(
+   int direction,
+   double entry,
+   double sl
+)
+{
+   if(direction!=OP_BUY &&
+      direction!=OP_SELL)
+      return(0);
+
+   if(entry<=0 ||
+      sl<=0)
+      return(0);
+
+   double stopDistance=
+      MathAbs(entry-sl);
+
+   if(stopDistance<=0)
+      return(0);
+
+   ENUM_RG_RISK_MODE mode=
+      RG_RuntimeRiskMode();
+
+   //================================================
+   // FIXED LOT
+   //================================================
+
+   if(mode==RG_RISK_LOT)
+   {
+      double fixedLot=
+         RG_RuntimeFixedLot();
+
+      // Runtime risk value mirrors the configured Fixed Lot when
+      // LOT mode is selected. Use it if the runtime fixed-lot
+      // cache has not been initialized yet.
+      if(fixedLot<=0)
+         fixedLot=RG_RuntimeRiskValue();
+
+      if(fixedLot<=0)
+         fixedLot=
+            MarketInfo(
+               Symbol(),
+               MODE_MINLOT
+            );
+
+      double lotStep=
+         MarketInfo(
+            Symbol(),
+            MODE_LOTSTEP
+         );
+
+      if(lotStep<=0)
+         lotStep=0.01;
+
+      fixedLot=
+         MathFloor(
+            fixedLot/lotStep
+         )*lotStep;
+
+      return(
+         NormalizeDouble(
+            fixedLot,
+            2
+         )
+      );
+   }
+
+   //================================================
+   // Calculate allowed money risk
+   //================================================
+
+   double riskValue=
+      RG_RuntimeRiskValue();
+
+   if(riskValue<=0)
+      return(0);
+
+   double riskMoney=0.0;
+
+   if(mode==RG_RISK_PERCENT)
+   {
+      riskMoney=
+         AccountBalance()*
+         riskValue/
+         100.0;
+   }
+   else
+   if(mode==RG_RISK_DOLLAR)
+   {
+      riskMoney=
+         riskValue;
+   }
+
+   if(riskMoney<=0)
+      return(0);
+
+   //================================================
+   // Broker tick economics
+   //================================================
+
+   double tickSize=
+      MarketInfo(
+         Symbol(),
+         MODE_TICKSIZE
+      );
+
+   double tickValue=
+      MarketInfo(
+         Symbol(),
+         MODE_TICKVALUE
+      );
+
+   if(tickSize<=0 ||
+      tickValue<=0)
+      return(0);
+
+   // Loss for 1 lot at selected SL
+   double lossPerLot=
+      (stopDistance/tickSize)*
+      tickValue;
+
+   if(lossPerLot<=0)
+      return(0);
+
+   double lot=
+      riskMoney/
+      lossPerLot;
+
+   //================================================
+   // Broker limits
+   //================================================
+
+   double minLot=
+      MarketInfo(
+         Symbol(),
+         MODE_MINLOT
+      );
+
+   double brokerMaxLot=
+      MarketInfo(
+         Symbol(),
+         MODE_MAXLOT
+      );
+
+   double lotStep=
+      MarketInfo(
+         Symbol(),
+         MODE_LOTSTEP
+      );
+
+   if(minLot<=0)
+      minLot=0.01;
+
+   if(brokerMaxLot<=0)
+      brokerMaxLot=100.0;
+
+   if(lotStep<=0)
+      lotStep=0.01;
+
+   if(MaxLot>0 &&
+      brokerMaxLot>MaxLot)
+      brokerMaxLot=MaxLot;
+
+   if(lot>brokerMaxLot)
+      lot=brokerMaxLot;
+
+   // Round DOWN so risk does not exceed selected risk
+   lot=
+      MathFloor(
+         lot/lotStep
+      )*lotStep;
+
+   if(lot<minLot)
+      lot=minLot;
+
+   if(lot>brokerMaxLot)
+      lot=brokerMaxLot;
+
+   return(
+      NormalizeDouble(
+         lot,
+         2
+      )
+   );
+}
+
+//====================================================
 // Dollar Risk / Reward
 //====================================================
 
@@ -1070,20 +1399,30 @@ void RG_GUI_UpdateRiskInfo()
       );
       return;
    }
+   
+double lot=
+   RG_GUI_CalculateRiskLot(
+      RG_RuntimePreviewDirection(),
+      RG_RuntimePreviewEntry(),
+      RG_RuntimePreviewSL()
+   );
 
-   double lot=
-      StrToDouble(
-         RG_GetEditText(RG_GUI_LOT_INPUT)
-      );
+if(lot>0)
+{
+   RG_SetEditText(
+      RG_GUI_LOT_INPUT,
+      DoubleToString(lot,2)
+   );
+}
 
-   double entry=
-      RG_RuntimePreviewEntry();
+double entry=
+   RG_RuntimePreviewEntry();
 
-   double sl=
-      RG_RuntimePreviewSL();
+double sl=
+   RG_RuntimePreviewSL();
 
-   double tp=
-      RG_RuntimePreviewTP();
+double tp=
+   RG_RuntimePreviewTP();
 
    if(lot<=0 || entry<=0)
    {
@@ -1099,7 +1438,14 @@ void RG_GUI_UpdateRiskInfo()
       RG_GUI_DollarPerPoint(lot);
 
    if(dpp<=0)
+   {
+      RG_GUI_SetText(
+         RG_GUI_RISK_INFO,
+         "Lot "+DoubleToString(lot,2)+"   Risk $ 0.00   Reward $ 0.00   R:R —",
+         RG_GUI_YELLOW
+      );
       return;
+   }
 
    double risk=0.0;
    double reward=0.0;
@@ -1120,9 +1466,10 @@ void RG_GUI_UpdateRiskInfo()
    }
 
    string text=
-      "Risk $   "+DoubleToString(risk,2)+
-      "        Reward $   "+DoubleToString(reward,2)+
-      "        R:R   "+rrText;
+      "Lot "+DoubleToString(lot,2)+
+      "   Risk $ "+DoubleToString(risk,2)+
+      "   Reward $ "+DoubleToString(reward,2)+
+      "   R:R "+rrText;
 
    RG_GUI_SetText(
       RG_GUI_RISK_INFO,
@@ -1132,31 +1479,317 @@ void RG_GUI_UpdateRiskInfo()
 }
 
 //====================================================
+// Calculate Preview Lot from selected Risk mode
+//
+// PERCENT = AccountBalance * Risk%
+// DOLLAR  = fixed dollar risk
+// LOT     = configured Fixed Lot
+//
+// IMPORTANT:
+// This function NEVER changes Fixed Lot.
+//====================================================
+
+
+//====================================================
 // SET validation / apply
 //====================================================
 
 bool RG_GUI_ApplySettings()
 {
-   int direction=
-      RG_RuntimePreviewDirection();
-
    if(!RG_RuntimePreviewActive())
       return(false);
 
-   double lot,entry,sl,tp;
+   int direction=RG_RuntimePreviewDirection();
+   double entry=RG_RuntimePreviewEntry();
+   double sl=RG_RuntimePreviewSL();
+   double tp=RG_RuntimePreviewTP();
 
-   if(!RG_GUI_ParsePreviewFields(
-      direction,lot,entry,sl,tp))
-      return(false);
+   if(direction!=OP_BUY && direction!=OP_SELL) return(false);
+   if(entry<=0) return(false);
 
-   if(MaxLot>0 && lot>MaxLot)
-      return(false);
+   if(UseStopLoss)
+   {
+      if(sl<=0) return(false);
+      if(direction==OP_BUY && sl>=entry) return(false);
+      if(direction==OP_SELL && sl<=entry) return(false);
+   }
 
-   return(
-      RG_RuntimeApplyPreview(
-         lot,entry,sl,tp
-      )
+   if(UseTakeProfit)
+   {
+      if(tp<=0) return(false);
+      if(direction==OP_BUY && tp<=entry) return(false);
+      if(direction==OP_SELL && tp>=entry) return(false);
+   }
+
+   double lot=
+   RG_GUI_CalculateRiskLot(
+      direction,
+      entry,
+      sl
    );
+
+if(lot<=0)
+   return(false);
+
+if(MaxLot>0 &&
+   lot>MaxLot)
+   lot=MaxLot;
+
+// IMPORTANT:
+// Do NOT overwrite configured Fixed Lot.
+// The calculated lot is only the volume
+// used for this trade.
+return(
+   RG_RuntimeApplyPreview(
+      lot,
+      entry,
+      sl,
+      tp
+   )
+);
+}
+
+//====================================================
+// Risk controls
+//====================================================
+
+void RG_GUI_UpdateRiskControls()
+{
+   if(ObjectFind(0,RG_GUI_RISK_VALUE)<0)
+      return;
+
+   ENUM_RG_RISK_MODE mode=
+      RG_RuntimeRiskMode();
+
+   double value=
+      RG_RuntimeRiskValue();
+
+   int digits=2;
+
+   if(mode==RG_RISK_PERCENT)
+      digits=1;
+
+   if(mode==RG_RISK_DOLLAR)
+      digits=2;
+
+   if(mode==RG_RISK_LOT)
+      digits=2;
+
+   // IMPORTANT:
+   // Do NOT display %, $ or Lot after the number.
+   // The mode buttons already show the unit.
+   RG_GUI_SetText(
+      RG_GUI_RISK_VALUE,
+      DoubleToString(value,digits),
+      RG_GUI_TEXT
+   );
+
+   if(ObjectFind(0,RG_GUI_RISK_PERCENT)>=0)
+   {
+      ObjectSetInteger(
+         0,
+         RG_GUI_RISK_PERCENT,
+         OBJPROP_BGCOLOR,
+         mode==RG_RISK_PERCENT ?
+         RG_GUI_BLUE :
+         RG_GUI_HEADER_BG
+      );
+   }
+
+   if(ObjectFind(0,RG_GUI_RISK_DOLLAR)>=0)
+   {
+      ObjectSetInteger(
+         0,
+         RG_GUI_RISK_DOLLAR,
+         OBJPROP_BGCOLOR,
+         mode==RG_RISK_DOLLAR ?
+         RG_GUI_BLUE :
+         RG_GUI_HEADER_BG
+      );
+   }
+
+   if(ObjectFind(0,RG_GUI_RISK_LOT)>=0)
+   {
+      ObjectSetInteger(
+         0,
+         RG_GUI_RISK_LOT,
+         OBJPROP_BGCOLOR,
+         mode==RG_RISK_LOT ?
+         RG_GUI_BLUE :
+         RG_GUI_HEADER_BG
+      );
+   }
+}
+
+//====================================================
+// Adjust Risk
+//
+// IMPORTANT:
+// Fixed Lot is NOT editable from the Risk panel.
+// % and $ can be changed with +/-.
+//====================================================
+
+void RG_GUI_AdjustRisk(int direction)
+{
+   ENUM_RG_RISK_MODE mode=
+      RG_RuntimeRiskMode();
+
+   // Fixed Lot is deliberately NOT editable
+   // through the Risk panel.
+   if(mode==RG_RISK_LOT)
+   {
+      RG_GUI_UpdateRiskControls();
+      return;
+   }
+
+   double value=
+      RG_RuntimeRiskValue();
+
+   double step=0.1;
+   double minimum=0.1;
+
+   if(mode==RG_RISK_DOLLAR)
+   {
+      step=1.0;
+      minimum=1.0;
+   }
+
+   value += direction*step;
+
+   if(value<minimum)
+      value=minimum;
+
+   int digits=
+      (mode==RG_RISK_PERCENT ? 1 : 2);
+
+   value=
+      NormalizeDouble(value,digits);
+
+   // Safety limit for percentage risk.
+   if(mode==RG_RISK_PERCENT)
+   {
+      if(value>100.0)
+         value=100.0;
+   }
+
+   RG_RuntimeSetRiskValue(value);
+
+   RG_GUI_UpdateRiskControls();
+}
+
+//====================================================
+// Set Risk Mode
+//====================================================
+
+void RG_GUI_SetRiskMode(
+   ENUM_RG_RISK_MODE mode
+)
+{
+   RG_RuntimeSetRiskMode(mode);
+
+   double value=
+      RG_RuntimeRiskValue();
+
+   if(mode==RG_RISK_PERCENT)
+   {
+      if(value<=0 || value>100)
+         value=1.0;
+   }
+   else
+   if(mode==RG_RISK_DOLLAR)
+   {
+      if(value<=0)
+         value=1.0;
+   }
+   else
+   {
+      // FIXED LOT:
+      // read the existing fixed lot.
+      // Do NOT change it from the panel.
+      value=
+         RG_RuntimeFixedLot();
+
+      if(value<=0)
+         value=
+            MarketInfo(
+               Symbol(),
+               MODE_MINLOT
+            );
+   }
+
+   RG_RuntimeSetRiskValue(value);
+
+   // IMPORTANT:
+   // Do NOT call RG_RuntimeSetFixedLot() here.
+   // Fixed Lot remains controlled by the input/settings.
+   RG_GUI_UpdateRiskControls();
+}
+//====================================================
+// Create initial Preview from current market + ATR
+//====================================================
+
+bool RG_GUI_CreateRiskPreview(int direction)
+{
+   if(direction!=OP_BUY && direction!=OP_SELL) return(false);
+
+   RefreshRates();
+   double entry=(direction==OP_BUY ? Ask : Bid);
+   if(entry<=0) return(false);
+
+   double atr=iATR(Symbol(),Period(),ATRPeriod,0);
+   if(atr<=0) return(false);
+
+   double distance=atr*ATRMultiplier;
+   if(distance<=0) return(false);
+
+   int digits=(int)MarketInfo(Symbol(),MODE_DIGITS);
+   entry=NormalizeDouble(entry,digits);
+
+   double sl=(direction==OP_BUY ? entry-distance : entry+distance);
+   double tp=(direction==OP_BUY ? entry+distance*InitialRR : entry-distance*InitialRR);
+
+   sl=NormalizeDouble(sl,digits);
+   tp=NormalizeDouble(tp,digits);
+
+   RG_RuntimeSetPreviewDirection(direction);
+   RG_RuntimeSetPreviewUsePips(false);
+   RG_RuntimeSetPreviewPrices(entry,sl,tp);
+
+   double lot=
+   RG_GUI_CalculateRiskLot(
+      direction,
+      entry,
+      sl
+   );
+
+if(lot<=0)
+   return(false);
+
+if(MaxLot>0 &&
+   lot>MaxLot)
+   lot=MaxLot;
+
+//================================================
+// IMPORTANT:
+//
+// Preview lot is DISPLAYED in the Lot field.
+//
+// We DO NOT call:
+// RG_RuntimeSetFixedLot(lot)
+//
+// because that would overwrite the configured
+// Fixed Lot value from Inputs.
+//================================================
+
+RG_SetEditText(
+   RG_GUI_LOT_INPUT,
+   DoubleToString(lot,2)
+);
+
+RG_GUI_UpdateRiskControls();
+RG_GUI_UpdateRiskInfo();
+
+return(true);
 }
 
 //====================================================
@@ -1202,12 +1835,19 @@ void RG_GUI_UpdatePositionSectionLayout()
    if(rows>8) rows=8;
 
    int count=RG_GUI_GetPositionCount();
-   int sectionY=y+RG_GUI_POSITION_TOP;
-   int rowsY=sectionY+RG_GUI_SECTION_H+8;
-   int rowsHeight=g_RG_GUI_PositionsExpanded ? rows*RG_GUI_ROW_H : 0;
-   int marketY=rowsY+rowsHeight+10;
-   int footerY=marketY+RG_GUI_MARKET_H+10;
-   int panelH=(footerY-y)+RG_GUI_FOOTER_H;
+
+   RGGuiLayout L;
+   RG_GUI_CalculateLayout(
+      x,y,w,rows,
+      g_RG_GUI_PositionsExpanded,
+      L
+   );
+
+   int sectionY=L.positionY;
+   int rowsY=L.rowsY;
+   int marketY=L.marketY;
+   int footerY=L.footerY;
+   int panelH=L.panelH;
 
    RG_GUI_SetPanelHeight(panelH);
 
@@ -1374,81 +2014,247 @@ bool RG_CreatePanel()
       RG_GUI_YELLOW,RG_GUI_STATUS_SIZE,
       RG_GUI_Z_TEXT
    );
+//====================================================
+// RISK ROW
+//
+// IMPORTANT:
+// Risk text is kept visible.
+// Everything is intentionally placed on ONE line.
+//
+// Layout:
+//
+// Risk   [ - ] [ value ] [ + ] [ % ] [ $ ] [ Lot ]
+//
+// Fixed Lot philosophy:
+// When LOT mode is selected, the displayed lot value
+// comes from Fixed Lot settings and +/- are disabled.
+//====================================================
 
-   // Primary trade buttons: three equal columns.
-   RG_GUI_CreateButton(
-      RG_GUI_BUY,"BUY",
-      L.actionX,L.primaryY,
-      L.actionW,RG_GUI_BUTTON_H,
-      RG_GUI_GREEN,clrBlack,RG_GUI_Z_BUTTON
-   );
-   RG_GUI_CreateButton(
-      RG_GUI_SELL,"SELL",
-      L.actionX+L.actionW+L.actionGap,L.primaryY,
-      L.actionW,RG_GUI_BUTTON_H,
-      RG_GUI_RED,clrWhite,RG_GUI_Z_BUTTON
-   );
-   RG_GUI_CreateButton(
-      RG_GUI_SET,"SET",
-      L.actionX+(L.actionW+L.actionGap)*2,L.primaryY,
-      L.actionW,RG_GUI_BUTTON_H,
-      RG_GUI_BLUE,clrWhite,RG_GUI_Z_BUTTON
-   );
+int riskY=L.riskY;
+int riskX=x+RG_GUI_PAD;
 
-   // Left: editable trade values. Right: utility actions.
-   int labelX=L.labelX;
-   int inputX=L.inputX;
-   int rightX=L.rightX;
+int riskGap=12;
 
-   RG_GUI_CreateText(RG_GUI_ENTRY_LABEL,"Entry",labelX,L.fieldsY+9,RG_GUI_TEXT,RG_GUI_TEXT_SIZE,RG_GUI_Z_TEXT);
-   RG_CreateEdit(RG_GUI_ENTRY_INPUT,"",inputX,L.fieldsY,RG_GUI_INPUT_W,RG_GUI_INPUT_H,RG_GUI_EDIT_BG,RG_GUI_EDIT_TEXT);
+// Dedicated space for the Risk label so it can never touch the - button.
+int riskLabelW=76;
+int riskMinusW=46;
+int riskValueW=68;
+int riskPlusW=46;
+int riskModeW=56;
 
-   RG_GUI_CreateText(RG_GUI_LOT_LABEL,"Lot",labelX,L.fieldsY+L.fieldStep+9,RG_GUI_TEXT,RG_GUI_TEXT_SIZE,RG_GUI_Z_TEXT);
-   RG_CreateEdit(RG_GUI_LOT_INPUT,DoubleToString(RG_RuntimeFixedLot(),2),inputX,L.fieldsY+L.fieldStep,RG_GUI_INPUT_W,RG_GUI_INPUT_H,RG_GUI_EDIT_BG,RG_GUI_EDIT_TEXT);
+int riskRowH=RG_GUI_RISK_H;
 
-   RG_GUI_CreateText(RG_GUI_SL_LABEL,"SL",labelX,L.fieldsY+(L.fieldStep*2)+9,RG_GUI_TEXT,RG_GUI_TEXT_SIZE,RG_GUI_Z_TEXT);
-   RG_CreateEdit(RG_GUI_SL_INPUT,"",inputX,L.fieldsY+(L.fieldStep*2),RG_GUI_INPUT_W,RG_GUI_INPUT_H,RG_GUI_EDIT_BG,RG_GUI_EDIT_TEXT);
+//--------------------------------------------
+// Risk label
+//--------------------------------------------
 
-   RG_GUI_CreateText(RG_GUI_TP_LABEL,"TP",labelX,L.fieldsY+(L.fieldStep*3)+9,RG_GUI_TEXT,RG_GUI_TEXT_SIZE,RG_GUI_Z_TEXT);
-   RG_CreateEdit(RG_GUI_TP_INPUT,"",inputX,L.fieldsY+(L.fieldStep*3),RG_GUI_INPUT_W,RG_GUI_INPUT_H,RG_GUI_EDIT_BG,RG_GUI_EDIT_TEXT);
+RG_GUI_CreateText(
+   RG_PREFIX+"RISK_LABEL",
+   "Risk",
+   riskX,
+   riskY+13,
+   RG_GUI_TEXT,
+   RG_GUI_TEXT_SIZE,
+   RG_GUI_Z_TEXT
+);
 
-   RG_GUI_CreateText(RG_GUI_MODE_LABEL,"Mode",labelX,L.modeY+9,RG_GUI_TEXT,RG_GUI_TEXT_SIZE,RG_GUI_Z_TEXT);
-   RG_GUI_CreateButton(
-      RG_GUI_MODE,
-      RG_RuntimePreviewUsePips()?"PIPS":"PRICE",
-      inputX,L.modeY,RG_GUI_INPUT_W,RG_GUI_INPUT_H,
-      RG_GUI_BLUE,clrWhite,RG_GUI_Z_BUTTON
-   );
+//--------------------------------------------
+// Minus
+//--------------------------------------------
 
+int rx=
+   riskX+
+   riskLabelW+
+   riskGap;
+
+RG_GUI_CreateButton(
+   RG_GUI_RISK_MINUS,
+   "-",
+   rx,
+   riskY,
+   riskMinusW,
+   riskRowH,
+   RG_GUI_HEADER_BG,
+   RG_GUI_TEXT,
+   RG_GUI_Z_BUTTON
+);
+
+//--------------------------------------------
+// Numeric value
+//--------------------------------------------
+
+rx+=
+   riskMinusW+
+   riskGap;
+
+RG_GUI_CreateText(
+   RG_GUI_RISK_VALUE,
+   "",
+   rx,
+   riskY+13,
+   RG_GUI_TEXT,
+   RG_GUI_TEXT_SIZE,
+   RG_GUI_Z_TEXT
+);
+
+//--------------------------------------------
+// Plus
+//--------------------------------------------
+
+rx+=
+   riskValueW+
+   riskGap;
+
+RG_GUI_CreateButton(
+   RG_GUI_RISK_PLUS,
+   "+",
+   rx,
+   riskY,
+   riskPlusW,
+   riskRowH,
+   RG_GUI_HEADER_BG,
+   RG_GUI_TEXT,
+   RG_GUI_Z_BUTTON
+);
+
+//--------------------------------------------
+// Percent
+//--------------------------------------------
+
+rx+=
+   riskPlusW+
+   riskGap;
+
+RG_GUI_CreateButton(
+   RG_GUI_RISK_PERCENT,
+   "%",
+   rx,
+   riskY,
+   riskModeW,
+   riskRowH,
+   RG_GUI_HEADER_BG,
+   RG_GUI_TEXT,
+   RG_GUI_Z_BUTTON
+);
+
+//--------------------------------------------
+// Dollar
+//--------------------------------------------
+
+rx+=
+   riskModeW+
+   riskGap;
+
+RG_GUI_CreateButton(
+   RG_GUI_RISK_DOLLAR,
+   "$",
+   rx,
+   riskY,
+   riskModeW,
+   riskRowH,
+   RG_GUI_HEADER_BG,
+   RG_GUI_TEXT,
+   RG_GUI_Z_BUTTON
+);
+
+//--------------------------------------------
+// Lot
+//--------------------------------------------
+
+rx+=
+   riskModeW+
+   riskGap;
+
+RG_GUI_CreateButton(
+   RG_GUI_RISK_LOT,
+   "Lot",
+   rx,
+   riskY,
+   riskModeW,
+   riskRowH,
+   RG_GUI_HEADER_BG,
+   RG_GUI_TEXT,
+   RG_GUI_Z_BUTTON
+);
+
+// Preview risk/reward information is displayed directly
+// under the Risk controls and above BUY / SELL / SET.
+RG_GUI_CreateText(
+   RG_GUI_RISK_INFO,
+   "Risk $ 0.00    Reward $ 0.00    R:R  —",
+   riskX,
+   riskY+47,
+   RG_GUI_YELLOW,
+   RG_GUI_STATUS_SIZE,
+   RG_GUI_Z_TEXT
+);
+
+//====================================================
+// BUY / SELL / SET
+//
+// Now BELOW the Risk row.
+//====================================================
+
+RG_GUI_CreateButton(
+   RG_GUI_BUY,
+   "BUY",
+   L.actionX,
+   L.primaryY,
+   L.actionW,
+   RG_GUI_BUTTON_H,
+   RG_GUI_GREEN,
+   clrBlack,
+   RG_GUI_Z_BUTTON
+);
+
+RG_GUI_CreateButton(
+   RG_GUI_SELL,
+   "SELL",
+   L.actionX+
+   L.actionW+
+   L.actionGap,
+   L.primaryY,
+   L.actionW,
+   RG_GUI_BUTTON_H,
+   RG_GUI_RED,
+   clrWhite,
+   RG_GUI_Z_BUTTON
+);
+
+RG_GUI_CreateButton(
+   RG_GUI_SET,
+   "SET",
+   L.actionX+
+   (L.actionW+
+   L.actionGap)*2,
+   L.primaryY,
+   L.actionW,
+   RG_GUI_BUTTON_H,
+   RG_GUI_BLUE,
+   clrWhite,
+   RG_GUI_Z_BUTTON
+);
+
+RG_GUI_UpdateRiskControls();
+
+   // Utility actions.
    RG_GUI_CreateButton(
       RG_GUI_CLOSE,"CLOSE ALL",
-      rightX,L.fieldsY,RG_GUI_SMALL_BUTTON_W,RG_GUI_BUTTON_H,
+      L.actionX,L.fieldsY,L.actionW,RG_GUI_BUTTON_H,
       RG_GUI_ORANGE,clrBlack,RG_GUI_Z_BUTTON
    );
    RG_GUI_CreateButton(
       RG_GUI_TRAILING,"TRAILING",
-      rightX,L.fieldsY+L.fieldStep,RG_GUI_SMALL_BUTTON_W,RG_GUI_BUTTON_H,
+      L.actionX+L.actionW+L.actionGap,L.fieldsY,L.actionW,RG_GUI_BUTTON_H,
       RG_GUI_YELLOW,clrBlack,RG_GUI_Z_BUTTON
    );
    RG_GUI_CreateButton(
       RG_GUI_CANCEL,"CANCEL",
-      rightX,L.fieldsY+(L.fieldStep*2),RG_GUI_SMALL_BUTTON_W,RG_GUI_BUTTON_H,
+      L.actionX+(L.actionW+L.actionGap)*2,L.fieldsY,L.actionW,RG_GUI_BUTTON_H,
       RG_GUI_RED,clrWhite,RG_GUI_Z_BUTTON
    );
 
-   // Risk / reward card.
-   RG_GUI_CreateRect(
-      RG_GUI_RISK_INFO+"_BG",
-      x+RG_GUI_PAD,L.riskY,
-      w-(2*RG_GUI_PAD),RG_GUI_RISK_H,
-      RG_GUI_HEADER_BG,RG_GUI_BORDER,RG_GUI_Z_PANEL+1
-   );
-   RG_GUI_CreateText(
-      RG_GUI_RISK_INFO,
-      "Risk $     —        Reward $     —        R:R     —",
-      x+RG_GUI_PAD+20,L.riskY+28,
-      RG_GUI_YELLOW,RG_GUI_TEXT_SIZE,RG_GUI_Z_TEXT
-   );
+   RG_GUI_UpdateRiskControls();
 
    // Collapsible position header.
    RG_GUI_CreateButton(

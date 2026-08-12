@@ -4,6 +4,7 @@
 #include <RG_Settings.mqh>
 #include <RG_Runtime.mqh>
 #include <GUI/RG_Edit.mqh>
+#include <Trade/RG_PositionSizer.mqh>
 
 //====================================================
 // RiskGuard MT4
@@ -113,11 +114,12 @@ bool RG_TV_CreateLine(
    ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
    ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,true);
 
-   // Preview is visual only and is not selectable.
-   ObjectSetInteger(0,name,OBJPROP_BACK,true);
-   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   // Preview price lines are deliberately draggable.
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,true);
    ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
-   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,65000);
 
    return(true);
 }
@@ -434,12 +436,11 @@ void RG_TV_ShowPreview(int direction)
       );
    }
 
-   double lots=
-      StrToDouble(
-         RG_GetEditText("RG_LOT_INPUT")
-      );
+   double lots=RG_CalculatePreviewLot(
+      direction,entry,sl
+   );
 
-   if(lots<=0)
+   if(lots<=0.0)
       lots=RG_RuntimeFixedLot();
 
    int digits=
@@ -486,8 +487,105 @@ void RG_ProcessTradeVisualization()
    RG_TV_ShowPreview(direction);
 }
 
-// No custom TP / SL drag.
-// Native MT4 owns live order level movement.
+//====================================================
+// Handle draggable PREVIEW lines
+//====================================================
+
+bool RG_TV_HandlePreviewDrag(string objectName)
+{
+   if(!RG_RuntimePreviewActive())
+      return(false);
+
+   int direction=RG_RuntimePreviewDirection();
+
+   if(direction!=OP_BUY && direction!=OP_SELL)
+      return(false);
+
+   bool isEntry=(objectName==
+      (direction==OP_BUY ? RG_TV_BUY_ENTRY : RG_TV_SELL_ENTRY));
+
+   bool isSL=(objectName==
+      (direction==OP_BUY ? RG_TV_BUY_SL : RG_TV_SELL_SL));
+
+   bool isTP=(objectName==
+      (direction==OP_BUY ? RG_TV_BUY_TP : RG_TV_SELL_TP));
+
+   if(!isEntry && !isSL && !isTP)
+      return(false);
+
+   double newPrice=
+      ObjectGetDouble(0,objectName,OBJPROP_PRICE1);
+
+   if(newPrice<=0.0)
+      return(true);
+
+   int digits=(int)MarketInfo(Symbol(),MODE_DIGITS);
+   newPrice=NormalizeDouble(newPrice,digits);
+
+   double entry=RG_RuntimePreviewEntry();
+   double sl=RG_RuntimePreviewSL();
+   double tp=RG_RuntimePreviewTP();
+
+   if(isEntry)
+   {
+      double delta=newPrice-entry;
+      entry=newPrice;
+
+      if(sl>0.0) sl=NormalizeDouble(sl+delta,digits);
+      if(tp>0.0) tp=NormalizeDouble(tp+delta,digits);
+   }
+   else if(isSL)
+   {
+      sl=newPrice;
+   }
+   else if(isTP)
+   {
+      tp=newPrice;
+   }
+
+   if(entry<=0.0)
+      return(true);
+
+   if(UseStopLoss)
+   {
+      if(sl<=0.0)
+         return(true);
+
+      if(direction==OP_BUY && sl>=entry)
+         return(true);
+
+      if(direction==OP_SELL && sl<=entry)
+         return(true);
+   }
+
+   if(UseTakeProfit && tp>0.0)
+   {
+      if(direction==OP_BUY && tp<=entry)
+         return(true);
+
+      if(direction==OP_SELL && tp>=entry)
+         return(true);
+   }
+
+   RG_RuntimeSetPreviewPrices(entry,sl,tp);
+
+   double lot=RG_CalculatePreviewLot(direction,entry,sl);
+
+   if(lot<=0.0)
+      return(true);
+
+   // In % and $ modes the target risk remains fixed and lot changes.
+   // In Lot mode the lot remains fixed and realized risk changes.
+   if(RG_RuntimeRiskMode()==RG_RISK_LOT)
+      RG_RuntimeSetRiskValue(lot);
+
+   RG_TV_ShowPreview(direction);
+
+   return(true);
+}
+
+// No custom TP / SL drag for live orders.
+// Native MT4 owns live position level movement.
 bool RG_TV_HandleTPDrag(string objectName)
 {
    return(false);

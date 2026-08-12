@@ -127,6 +127,95 @@ bool RG_PanelBreakEvenTicket(int ticket)
 }
 
 //====================================================
+// Manual RiskFree = Break Even + commission coverage
+// Recalculates the target from the ORIGINAL open price every time.
+// It intentionally does not depend on the current SL or a "done" flag,
+// so RF remains usable after BE or after a manual SL change.
+//====================================================
+bool RG_PanelRiskFreeTicket(int ticket)
+{
+   if(ticket<=0)
+      return(false);
+
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
+      return(false);
+
+   if(OrderSymbol()!=Symbol() ||
+      OrderMagicNumber()!=MagicNumber)
+      return(false);
+
+   int type=OrderType();
+   if(type!=OP_BUY && type!=OP_SELL)
+      return(false);
+
+   RefreshRates();
+
+   double lots=OrderLots();
+   if(lots<=0.0)
+      return(false);
+
+   double commissionCost=MathAbs(OrderCommission());
+   if(commissionCost<=0.0)
+   {
+      // No commission means commission-neutral RF is exactly BE.
+      return(RG_PanelBreakEvenTicket(ticket));
+   }
+
+   double tickValue=MarketInfo(OrderSymbol(),MODE_TICKVALUE);
+   double tickSize =MarketInfo(OrderSymbol(),MODE_TICKSIZE);
+   if(tickValue<=0.0 || tickSize<=0.0)
+      return(false);
+
+   // Price distance whose monetary value equals the commission.
+   double commissionDistance=
+      commissionCost*tickSize/(tickValue*lots);
+
+   double openPrice=OrderOpenPrice();
+   double newSL=0.0;
+   double stopLevel=MarketInfo(OrderSymbol(),MODE_STOPLEVEL)*Point;
+
+   if(type==OP_BUY)
+   {
+      newSL=NormalizeDouble(openPrice+commissionDistance,Digits);
+
+      // The stop must be below the current Bid by the broker's minimum distance.
+      if(newSL>=Bid-stopLevel)
+         return(false);
+   }
+   else
+   {
+      newSL=NormalizeDouble(openPrice-commissionDistance,Digits);
+
+      // The stop must be above the current Ask by the broker's minimum distance.
+      if(newSL<=Ask+stopLevel)
+         return(false);
+   }
+
+   ResetLastError();
+   bool result=OrderModify(
+      ticket,
+      OrderOpenPrice(),
+      newSL,
+      OrderTakeProfit(),
+      0,
+      clrNONE
+   );
+
+   if(!result)
+   {
+      Print(
+         "RiskGuard RF failed. Ticket=",ticket,
+         " TargetSL=",DoubleToString(newSL,Digits),
+         " Commission=",DoubleToString(commissionCost,2),
+         " Error=",GetLastError()
+      );
+      return(false);
+   }
+
+   return(true);
+}
+
+//====================================================
 // Native MT4 levels
 //====================================================
 
@@ -265,9 +354,6 @@ void OnTick()
 
    RG_ProcessPositionManager();
 
-   if(UseTakeProfit)
-      RG_ProcessTakeProfits();
-
    if(UseRiskFree)
       RG_ProcessRiskFree();
 
@@ -299,6 +385,38 @@ void OnChartEvent(
 
    if(id==CHARTEVENT_OBJECT_CLICK)
    {
+      // Focus exactly one editable OBJ_EDIT control.
+      // OBJPROP_SELECTED is used only for the clicked edit control.
+      if(
+         sparam==RG_GUI_ENTRY_INPUT ||
+         sparam==RG_GUI_SL_INPUT ||
+         sparam==RG_GUI_TP_INPUT ||
+         sparam==RG_GUI_LOT_INPUT
+      )
+      {
+         string editNames[4];
+         editNames[0]=RG_GUI_ENTRY_INPUT;
+         editNames[1]=RG_GUI_LOT_INPUT;
+         editNames[2]=RG_GUI_SL_INPUT;
+         editNames[3]=RG_GUI_TP_INPUT;
+
+         for(int ei=0;ei<4;ei++)
+         {
+            if(ObjectFind(0,editNames[ei])>=0)
+            {
+               ObjectSetInteger(0,editNames[ei],OBJPROP_READONLY,false);
+               ObjectSetInteger(0,editNames[ei],OBJPROP_SELECTABLE,true);
+               ObjectSetInteger(0,editNames[ei],OBJPROP_HIDDEN,false);
+               ObjectSetInteger(0,editNames[ei],OBJPROP_ZORDER,60000);
+               ObjectSetInteger(0,editNames[ei],OBJPROP_SELECTED,
+                                editNames[ei]==sparam);
+            }
+         }
+
+         ChartRedraw();
+         return;
+      }
+
       // PANEL TITLE = collapse / expand the complete panel
       if(sparam==RG_GUI_PANEL_TOGGLE)
       {
@@ -318,11 +436,14 @@ void OnChartEvent(
       // BUY = PREVIEW ONLY
       if(sparam==RG_GUI_BUY)
       {
-         RG_RuntimeSetPreviewDirection(OP_BUY);
-         RG_GUI_SetPreviewPriceFields(OP_BUY);
+         if(!RG_GUI_CreateRiskPreview(OP_BUY))
+         {
+            RG_MainStatus("BUY Preview failed - ATR/risk unavailable");
+            return;
+         }
 
          RG_MainStatus(
-            "BUY Preview - edit values then SET"
+            "BUY Preview - drag Entry / SL / TP then SET"
          );
 
          RG_TV_ShowPreview(OP_BUY);
@@ -334,11 +455,14 @@ void OnChartEvent(
       // SELL = PREVIEW ONLY
       if(sparam==RG_GUI_SELL)
       {
-         RG_RuntimeSetPreviewDirection(OP_SELL);
-         RG_GUI_SetPreviewPriceFields(OP_SELL);
+         if(!RG_GUI_CreateRiskPreview(OP_SELL))
+         {
+            RG_MainStatus("SELL Preview failed - ATR/risk unavailable");
+            return;
+         }
 
          RG_MainStatus(
-            "SELL Preview - edit values then SET"
+            "SELL Preview - drag Entry / SL / TP then SET"
          );
 
          RG_TV_ShowPreview(OP_SELL);
@@ -363,6 +487,52 @@ void OnChartEvent(
             );
          }
 
+         return;
+      }
+
+      // Risk value minus / plus
+      if(sparam==RG_GUI_RISK_MINUS)
+      {
+         RG_GUI_AdjustRisk(-1);
+         if(RG_RuntimePreviewActive())
+            RG_TV_ShowPreview(RG_RuntimePreviewDirection());
+         RG_MainStatus("Risk decreased");
+         return;
+      }
+
+      if(sparam==RG_GUI_RISK_PLUS)
+      {
+         RG_GUI_AdjustRisk(1);
+         if(RG_RuntimePreviewActive())
+            RG_TV_ShowPreview(RG_RuntimePreviewDirection());
+         RG_MainStatus("Risk increased");
+         return;
+      }
+
+      if(sparam==RG_GUI_RISK_PERCENT)
+      {
+         RG_GUI_SetRiskMode(RG_RISK_PERCENT);
+         if(RG_RuntimePreviewActive())
+            RG_TV_ShowPreview(RG_RuntimePreviewDirection());
+         RG_MainStatus("Risk mode: %");
+         return;
+      }
+
+      if(sparam==RG_GUI_RISK_DOLLAR)
+      {
+         RG_GUI_SetRiskMode(RG_RISK_DOLLAR);
+         if(RG_RuntimePreviewActive())
+            RG_TV_ShowPreview(RG_RuntimePreviewDirection());
+         RG_MainStatus("Risk mode: $");
+         return;
+      }
+
+      if(sparam==RG_GUI_RISK_LOT)
+      {
+         RG_GUI_SetRiskMode(RG_RISK_LOT);
+         if(RG_RuntimePreviewActive())
+            RG_TV_ShowPreview(RG_RuntimePreviewDirection());
+         RG_MainStatus("Risk mode: Lot");
          return;
       }
 
@@ -420,7 +590,7 @@ void OnChartEvent(
          if(!RG_GUI_ApplySettings())
          {
             RG_MainStatus(
-               "SET failed: check Entry / SL / TP / Lot"
+               "SET failed: check Preview / Risk / ATR"
             );
 
             return;
@@ -514,7 +684,7 @@ void OnChartEvent(
 
          if(ticket>0)
          {
-            if(RG_ApplyManualRiskFree(ticket))
+            if(RG_PanelRiskFreeTicket(ticket))
                RG_MainStatus(
                   "RF applied"
                );
@@ -528,6 +698,52 @@ void OnChartEvent(
          RG_UpdateGUI();
          RG_UpdateFooter();
 
+         return;
+      }
+
+      // Fast partial close: one third of CURRENT lots
+      if(RG_GUI_IsPositionObject(
+         sparam,RG_GUI_POS_THIRD))
+      {
+         int ticket=
+            RG_GUI_TicketFromPositionObject(
+               sparam,RG_GUI_POS_THIRD
+            );
+
+         if(ticket>0)
+         {
+            if(RG_CloseOneThird(ticket))
+               RG_MainStatus("1/3 closed");
+            else
+               RG_MainStatus("1/3 close failed - lot step/min lot");
+         }
+
+         RG_ProcessPositionManager();
+         RG_UpdateGUI();
+         RG_UpdateFooter();
+         return;
+      }
+
+      // Fast partial close: one half of CURRENT lots
+      if(RG_GUI_IsPositionObject(
+         sparam,RG_GUI_POS_HALF))
+      {
+         int ticket=
+            RG_GUI_TicketFromPositionObject(
+               sparam,RG_GUI_POS_HALF
+            );
+
+         if(ticket>0)
+         {
+            if(RG_CloseHalf(ticket))
+               RG_MainStatus("1/2 closed");
+            else
+               RG_MainStatus("1/2 close failed - lot step/min lot");
+         }
+
+         RG_ProcessPositionManager();
+         RG_UpdateGUI();
+         RG_UpdateFooter();
          return;
       }
 
@@ -590,46 +806,10 @@ void OnChartEvent(
    }
 
    //=================================================
-   // EDIT FINISHED
+   // PREVIEW DRAG / LIVE NATIVE TRADE DRAG
    //=================================================
 
-   if(id==CHARTEVENT_OBJECT_ENDEDIT)
-   {
-      if(
-         sparam==RG_GUI_LOT_INPUT ||
-         sparam==RG_GUI_ENTRY_INPUT ||
-         sparam==RG_GUI_SL_INPUT ||
-         sparam==RG_GUI_TP_INPUT
-      )
-      {
-         if(RG_RuntimePreviewActive())
-         {
-            if(RG_GUI_SyncPreviewFromFields())
-            {
-               RG_TV_ShowPreview(
-                  RG_RuntimePreviewDirection()
-               );
-
-               RG_GUI_UpdateRiskInfo();
-
-               RG_MainStatus(
-                  "Values changed - review then SET"
-               );
-            }
-            else
-            {
-               RG_MainStatus(
-                  "Invalid preview values"
-               );
-            }
-         }
-
-         return;
-      }
-   }
-
-   //=================================================
-   // Native MT4 trade-level drag
+   
    //
    // No custom TP/SL drag handling.
    // Native MT4 owns live order level movement.
@@ -637,6 +817,16 @@ void OnChartEvent(
 
    if(id==CHARTEVENT_OBJECT_DRAG)
    {
+      if(RG_TV_HandlePreviewDrag(sparam))
+      {
+         RG_GUI_UpdateRiskControls();
+         RG_GUI_UpdateRiskInfo();
+         RG_UpdateGUI();
+         RG_UpdateFooter();
+         return;
+      }
+
+      // Native MT4 trade-level drag: no custom intervention.
       RG_UpdateGUI();
       RG_UpdateFooter();
 

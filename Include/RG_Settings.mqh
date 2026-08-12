@@ -42,6 +42,23 @@ input double FixedLot = 0.01;
 
 input double MaxLot = 100.0;
 
+//====================================================
+// RISK ENGINE / PREVIEW
+//====================================================
+
+enum ENUM_RG_RISK_MODE
+{
+   RG_RISK_PERCENT = 0,
+   RG_RISK_DOLLAR  = 1,
+   RG_RISK_LOT     = 2
+};
+
+input ENUM_RG_RISK_MODE DefaultRiskMode = RG_RISK_LOT;
+input double RiskValue = 1.0;
+input int ATRPeriod = 14;
+input double ATRMultiplier = 1.0;
+input double InitialRR = 2.0;
+
 
 //====================================================
 // STOP LOSS

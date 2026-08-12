@@ -3,7 +3,7 @@
 
 #include <GUI/RG_Theme.mqh>
 
-#define RG_EDIT_ZORDER 50040
+#define RG_EDIT_ZORDER 60000
 
 bool RG_CreateEdit(
    string name,
@@ -32,8 +32,10 @@ bool RG_CreateEdit(
 
    ObjectSetString(0,name,OBJPROP_FONT,RG_FONT_NAME);
    ObjectSetInteger(0,name,OBJPROP_FONTSIZE,RG_FONT_LABEL_SIZE);
+   ObjectSetInteger(0,name,OBJPROP_ALIGN,ALIGN_LEFT);
    ObjectSetString(0,name,OBJPROP_TEXT,text);
 
+   // OBJ_EDIT must be selectable/selected so MT4 can give it keyboard focus.
    ObjectSetInteger(0,name,OBJPROP_READONLY,false);
    ObjectSetInteger(0,name,OBJPROP_SELECTABLE,true);
    ObjectSetInteger(0,name,OBJPROP_SELECTED,false);

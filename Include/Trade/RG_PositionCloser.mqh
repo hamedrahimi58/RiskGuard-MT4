@@ -205,6 +205,47 @@ bool RG_ClosePartial(
 
 
 //----------------------------------------------------
+// Fast Partial Close Helpers
+//----------------------------------------------------
+
+bool RG_CloseOneThird(int ticket)
+{
+   if(ticket<=0)
+      return(false);
+
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
+      return(false);
+
+   if(OrderType()!=OP_BUY && OrderType()!=OP_SELL)
+      return(false);
+
+   double currentLots=OrderLots();
+   if(currentLots<=0)
+      return(false);
+
+   return(RG_ClosePartial(ticket,currentLots/3.0));
+}
+
+bool RG_CloseHalf(int ticket)
+{
+   if(ticket<=0)
+      return(false);
+
+   if(!OrderSelect(ticket,SELECT_BY_TICKET))
+      return(false);
+
+   if(OrderType()!=OP_BUY && OrderType()!=OP_SELL)
+      return(false);
+
+   double currentLots=OrderLots();
+   if(currentLots<=0)
+      return(false);
+
+   return(RG_ClosePartial(ticket,currentLots/2.0));
+}
+
+
+//----------------------------------------------------
 // Close All Positions
 //----------------------------------------------------
 
