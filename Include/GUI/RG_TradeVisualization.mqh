@@ -19,7 +19,7 @@
 //====================================================
 
 #define RG_TV_PREFIX "RGTV_"
-#define RG_TV_FONT   "Arial"
+#define RG_TV_FONT   "Times New Roman"
 
 #define RG_TV_BUY_ENTRY  RG_TV_PREFIX+"PREVIEW_BUY_ENTRY"
 #define RG_TV_BUY_SL     RG_TV_PREFIX+"PREVIEW_BUY_SL"
@@ -38,6 +38,16 @@
 #define RG_TV_SELL_TP_LABEL    RG_TV_PREFIX+"LABEL_SELL_TP"
 
 #define RG_TV_DECISION_LABEL   RG_TV_PREFIX+"DECISION"
+#define RG_TV_BUY_RISK_ZONE     RG_TV_PREFIX+"BUY_RISK_ZONE"
+#define RG_TV_BUY_REWARD_ZONE   RG_TV_PREFIX+"BUY_REWARD_ZONE"
+#define RG_TV_SELL_RISK_ZONE    RG_TV_PREFIX+"SELL_RISK_ZONE"
+#define RG_TV_SELL_REWARD_ZONE  RG_TV_PREFIX+"SELL_REWARD_ZONE"
+
+// Soft, eye-friendly preview zone colors.
+#define RG_TV_RISK_ZONE_COLOR   C'145,62,62'
+#define RG_TV_REWARD_ZONE_COLOR C'72,132,91'
+#define RG_TV_ZONE_BARS         36
+#define RG_TV_GRADIENT_STEPS    12
 
 int    g_RG_TV_LastDirection=-1;
 double g_RG_TV_LastEntry=0.0;
@@ -73,7 +83,7 @@ void RG_TV_DeleteTradeVisualization()
 }
 
 //====================================================
-// Preview line
+// Invisible draggable price handle
 //====================================================
 
 bool RG_TV_CreateLine(
@@ -85,39 +95,39 @@ bool RG_TV_CreateLine(
    if(price<=0)
       return(false);
 
-   datetime t=TimeCurrent();
-
-   if(t<=0)
-      t=TimeLocal();
-
-   datetime t2=
-      t+PeriodSeconds()*20;
-
-   if(t2<=t)
-      t2=t+3600;
+   // Use OBJ_HLINE intentionally.
+   // MQL4 provides native mouse movement for HLINE objects when
+   // OBJPROP_SELECTABLE is enabled. This avoids the two-anchor
+   // ambiguity of OBJ_TREND for a price-only Entry/SL/TP line.
 
    if(ObjectFind(0,name)<0)
    {
       if(!ObjectCreate(
-         0,name,OBJ_TREND,0,
-         t,price,t2,price))
+         0,name,OBJ_HLINE,0,0,price))
          return(false);
    }
    else
    {
-      ObjectMove(0,name,0,t,price);
-      ObjectMove(0,name,1,t2,price);
+      if(!ObjectMove(
+         0,name,0,0,price))
+         return(false);
    }
 
    ObjectSetInteger(0,name,OBJPROP_COLOR,lineColor);
    ObjectSetInteger(0,name,OBJPROP_STYLE,lineStyle);
    ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
-   ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,true);
 
-   // Preview price lines are deliberately draggable.
+   // Foreground + selectable = mouse-draggable.
    ObjectSetInteger(0,name,OBJPROP_BACK,false);
+
+   // IMPORTANT:
+   // MQL4's official HLINE example enables BOTH properties:
+   // SELECTABLE=true and SELECTED=true.
+   // SELECTABLE makes the object movable; SELECTED makes it
+   // immediately highlighted/eligible for mouse movement.
    ObjectSetInteger(0,name,OBJPROP_SELECTABLE,true);
-   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,true);
+
    ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
    ObjectSetInteger(0,name,OBJPROP_ZORDER,65000);
 
@@ -134,50 +144,331 @@ bool RG_TV_CreateText(
    double price,
    color textColor)
 {
-   datetime t=TimeCurrent();
+   datetime labelTime=TimeCurrent();
+   if(labelTime<=0)
+      labelTime=TimeLocal();
 
-   if(t<=0)
-      t=TimeLocal();
+   int sec=PeriodSeconds();
+   if(sec<=0)
+      sec=60;
+
+   // Put labels a few bars to the right of the current bar.
+   labelTime += sec*3;
 
    if(ObjectFind(0,name)<0)
    {
       if(!ObjectCreate(
-         0,name,OBJ_TEXT,0,t,price))
+         0,name,OBJ_TEXT,0,labelTime,price))
          return(false);
    }
    else
    {
-      ObjectMove(0,name,0,t,price);
+      ObjectMove(0,name,0,labelTime,price);
    }
 
-   ObjectSetString(
-      0,name,OBJPROP_TEXT,text);
+   ObjectSetString(0,name,OBJPROP_TEXT,text);
+   ObjectSetString(0,name,OBJPROP_FONT,RG_TV_FONT);
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,8);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,textColor);
+   ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_RIGHT);
 
-   ObjectSetString(
-      0,name,OBJPROP_FONT,RG_TV_FONT);
-
-   ObjectSetInteger(
-      0,name,OBJPROP_FONTSIZE,8);
-
-   ObjectSetInteger(
-      0,name,OBJPROP_COLOR,textColor);
-
-   ObjectSetInteger(
-      0,name,OBJPROP_ANCHOR,ANCHOR_LEFT);
-
-   ObjectSetInteger(
-      0,name,OBJPROP_SELECTABLE,false);
-
-   ObjectSetInteger(
-      0,name,OBJPROP_SELECTED,false);
-
-   ObjectSetInteger(
-      0,name,OBJPROP_HIDDEN,true);
-
-   ObjectSetInteger(
-      0,name,OBJPROP_BACK,true);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
 
    return(true);
+}
+
+color RG_TV_MixColor(
+   color fromColor,
+   color toColor,
+   double amount)
+{
+   if(amount<0.0) amount=0.0;
+   if(amount>1.0) amount=1.0;
+
+   int c1=(int)fromColor;
+   int c2=(int)toColor;
+
+   int r1=c1 & 0xFF;
+   int g1=(c1 >> 8) & 0xFF;
+   int b1=(c1 >> 16) & 0xFF;
+
+   int r2=c2 & 0xFF;
+   int g2=(c2 >> 8) & 0xFF;
+   int b2=(c2 >> 16) & 0xFF;
+
+   int r=(int)MathRound(r1+(r2-r1)*amount);
+   int g=(int)MathRound(g1+(g2-g1)*amount);
+   int b=(int)MathRound(b1+(b2-b1)*amount);
+
+   return((color)(r | (g << 8) | (b << 16)));
+}
+
+bool RG_TV_CreateZone(
+   string name,
+   double price1,
+   double price2,
+   color zoneColor)
+{
+   if(price1<=0.0 || price2<=0.0)
+      return(false);
+
+   double top=MathMax(price1,price2);
+   double bottom=MathMin(price1,price2);
+
+   datetime t1=iTime(Symbol(),Period(),0);
+   if(t1<=0)
+      t1=TimeCurrent();
+
+   int sec=PeriodSeconds();
+   if(sec<=0)
+      sec=60;
+
+   // V13: twice the V12 width.
+   datetime t2=t1+(sec*RG_TV_ZONE_BARS);
+
+   // A subtle left-to-right gradient:
+   // slightly stronger near the market/entry side and softer toward
+   // the right edge. Each strip is a normal filled MT4 rectangle.
+   color edgeColor;
+
+   int base=(int)zoneColor;
+   int br=base & 0xFF;
+   int bg=(base >> 8) & 0xFF;
+   int bb=(base >> 16) & 0xFF;
+
+   // Blend toward black only mildly so the gradient remains soft.
+   edgeColor=(color)(
+      (int)MathRound(br*0.62) |
+      ((int)MathRound(bg*0.62) << 8) |
+      ((int)MathRound(bb*0.62) << 16)
+   );
+
+   for(int i=0;i<RG_TV_GRADIENT_STEPS;i++)
+   {
+      string partName=
+         name+"_G"+IntegerToString(i);
+
+      double a0=(double)i/RG_TV_GRADIENT_STEPS;
+      double a1=(double)(i+1)/RG_TV_GRADIENT_STEPS;
+
+      datetime x0=
+         t1+(int)MathRound((t2-t1)*a0);
+
+      datetime x1=
+         t1+(int)MathRound((t2-t1)*a1);
+
+      if(ObjectFind(0,partName)<0)
+      {
+         if(!ObjectCreate(
+            0,partName,OBJ_RECTANGLE,0,
+            x0,top,
+            x1,bottom))
+            continue;
+      }
+      else
+      {
+         ObjectMove(0,partName,0,x0,top);
+         ObjectMove(0,partName,1,x1,bottom);
+      }
+
+      // Slightly darker on the left, softer on the right.
+      double mix=0.20+(0.55*a0);
+
+      color c=RG_TV_MixColor(
+         edgeColor,
+         zoneColor,
+         mix
+      );
+
+      ObjectSetInteger(0,partName,OBJPROP_COLOR,c);
+      ObjectSetInteger(0,partName,OBJPROP_STYLE,STYLE_SOLID);
+      ObjectSetInteger(0,partName,OBJPROP_WIDTH,1);
+      ObjectSetInteger(0,partName,OBJPROP_FILL,true);
+      ObjectSetInteger(0,partName,OBJPROP_BACK,true);
+      ObjectSetInteger(0,partName,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(0,partName,OBJPROP_SELECTED,false);
+      ObjectSetInteger(0,partName,OBJPROP_HIDDEN,true);
+   }
+
+   return(true);
+}
+
+//====================================================
+// Zone information labels
+//====================================================
+
+bool RG_TV_CreateZoneText(
+   string name,
+   string text,
+   double price,
+   color textColor)
+{
+   datetime t1=iTime(Symbol(),Period(),0);
+   if(t1<=0)
+      t1=TimeCurrent();
+
+   int sec=PeriodSeconds();
+   if(sec<=0)
+      sec=60;
+
+   // Shift the zone information slightly to the right so the full
+   // text remains comfortably inside the wide gradient zone.
+   datetime labelTime=t1+(sec*12);
+
+   if(ObjectFind(0,name)<0)
+   {
+      if(!ObjectCreate(
+         0,name,OBJ_TEXT,0,
+         labelTime,price))
+         return(false);
+   }
+   else
+   {
+      ObjectMove(0,name,0,labelTime,price);
+   }
+
+   ObjectSetString(0,name,OBJPROP_TEXT,text);
+   ObjectSetString(0,name,OBJPROP_FONT,RG_TV_FONT);
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,9);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,textColor);
+   ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_CENTER);
+
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+
+   return(true);
+}
+
+void RG_TV_DrawZones(
+   string side,
+   double entry,
+   double sl,
+   double tp,
+   double risk,
+   double reward,
+   double rr,
+   int digits)
+{
+   string riskName;
+   string rewardName;
+   string riskInfoName;
+   string rewardInfoName;
+
+   if(side=="BUY")
+   {
+      riskName=RG_TV_BUY_RISK_ZONE;
+      rewardName=RG_TV_BUY_REWARD_ZONE;
+   }
+   else
+   {
+      riskName=RG_TV_SELL_RISK_ZONE;
+      rewardName=RG_TV_SELL_REWARD_ZONE;
+   }
+
+   riskInfoName=riskName+"_INFO";
+   rewardInfoName=rewardName+"_INFO";
+
+   // Risk zone: Entry <-> SL.
+   if(sl>0.0)
+   {
+      RG_TV_CreateZone(
+         riskName,
+         entry,
+         sl,
+         RG_TV_RISK_ZONE_COLOR
+      );
+
+      // Keep SL information comfortably inside the lower part of the risk zone.
+      double riskInfoPrice=sl+(entry-sl)*0.28;
+
+      RG_TV_CreateZoneText(
+         riskInfoName,
+         "SL  "+DoubleToString(sl,digits)+
+         "   "+DoubleToString(risk,2)+"$",
+         riskInfoPrice,
+         clrWhite
+      );
+   }
+   else
+   {
+      RG_TV_DeleteObject(riskName);
+      RG_TV_DeleteObject(riskInfoName);
+   }
+
+   // Reward zone: Entry <-> TP.
+   if(tp>0.0)
+   {
+      RG_TV_CreateZone(
+         rewardName,
+         entry,
+         tp,
+         RG_TV_REWARD_ZONE_COLOR
+      );
+
+      // Keep TP information comfortably inside the upper part of the reward zone.
+      double rewardInfoPrice=entry+(tp-entry)*0.78;
+
+      RG_TV_CreateZoneText(
+         rewardInfoName,
+         "TP  "+DoubleToString(tp,digits)+
+         "   "+DoubleToString(reward,2)+"$",
+         rewardInfoPrice,
+         clrWhite
+      );
+   }
+   else
+   {
+      RG_TV_DeleteObject(rewardName);
+      RG_TV_DeleteObject(rewardInfoName);
+   }
+}
+
+void RG_TV_DrawZones(
+   string side,
+   double entry,
+   double sl,
+   double tp)
+{
+   string riskName;
+   string rewardName;
+
+   if(side=="BUY")
+   {
+      riskName=RG_TV_BUY_RISK_ZONE;
+      rewardName=RG_TV_BUY_REWARD_ZONE;
+   }
+   else
+   {
+      riskName=RG_TV_SELL_RISK_ZONE;
+      rewardName=RG_TV_SELL_REWARD_ZONE;
+   }
+
+   // Risk zone: Entry <-> SL.
+   if(sl>0.0)
+      RG_TV_CreateZone(
+         riskName,
+         entry,
+         sl,
+         RG_TV_RISK_ZONE_COLOR
+      );
+   else
+      RG_TV_DeleteObject(riskName);
+
+   // Reward zone: Entry <-> TP.
+   if(tp>0.0)
+      RG_TV_CreateZone(
+         rewardName,
+         entry,
+         tp,
+         RG_TV_REWARD_ZONE_COLOR
+      );
+   else
+      RG_TV_DeleteObject(rewardName);
 }
 
 //====================================================
@@ -205,35 +496,44 @@ void RG_TV_DrawPreviewSet(
    if(tp>0)
       tp=NormalizeDouble(tp,digits);
 
-   string e=prefix+"_ENTRY";
-   string s=prefix+"_SL";
-   string t=prefix+"_TP";
+   // Use the canonical object names that the drag handler checks.
+   string e;
+   string s;
+   string t;
 
-   string el=e+"_LABEL";
-   string sln=s+"_LABEL";
-   string tl=t+"_LABEL";
+   string el;
+   string sln;
+   string tl;
+
+   if(side=="BUY")
+   {
+      e=RG_TV_BUY_ENTRY;
+      s=RG_TV_BUY_SL;
+      t=RG_TV_BUY_TP;
+
+      el=RG_TV_BUY_ENTRY_LABEL;
+      sln=RG_TV_BUY_SL_LABEL;
+      tl=RG_TV_BUY_TP_LABEL;
+   }
+   else
+   {
+      e=RG_TV_SELL_ENTRY;
+      s=RG_TV_SELL_SL;
+      t=RG_TV_SELL_TP;
+
+      el=RG_TV_SELL_ENTRY_LABEL;
+      sln=RG_TV_SELL_SL_LABEL;
+      tl=RG_TV_SELL_TP_LABEL;
+   }
 
    RG_TV_CreateLine(
-      e,entry,clrWhite,STYLE_DOT);
-
-   RG_TV_CreateText(
-      el,
-      side+" ENTRY "+DoubleToString(entry,digits),
-      entry,
-      clrWhite
-   );
+      e,entry,clrNONE,STYLE_SOLID);
 
    if(sl>0)
    {
       RG_TV_CreateLine(
-         s,sl,clrTomato,STYLE_DASH);
+         s,sl,clrNONE,STYLE_SOLID);
 
-      RG_TV_CreateText(
-         sln,
-         side+" SL "+DoubleToString(sl,digits),
-         sl,
-         clrTomato
-      );
    }
    else
    {
@@ -244,20 +544,15 @@ void RG_TV_DrawPreviewSet(
    if(tp>0)
    {
       RG_TV_CreateLine(
-         t,tp,clrLime,STYLE_DASH);
+         t,tp,clrNONE,STYLE_SOLID);
 
-      RG_TV_CreateText(
-         tl,
-         side+" TP "+DoubleToString(tp,digits),
-         tp,
-         clrLime
-      );
    }
    else
    {
       RG_TV_DeleteObject(t);
       RG_TV_DeleteObject(tl);
    }
+
 }
 
 double RG_TV_DollarPerPoint(double lot)
@@ -292,61 +587,66 @@ void RG_TV_DrawDecision(
    int direction,
    int digits)
 {
-   RG_TV_DeleteObject(RG_TV_DECISION_LABEL);
+   RG_TV_DeleteObject(RG_TV_PREFIX+"RISK_INFO");
+   RG_TV_DeleteObject(RG_TV_PREFIX+"REWARD_INFO");
+   RG_TV_DeleteObject(RG_TV_PREFIX+"ENTRY_INFO");
 
-   if(entry<=0 ||
-      lot<=0)
+   if(entry<=0.0 || lot<=0.0)
       return;
 
-   double dpp=
-      RG_TV_DollarPerPoint(lot);
+   double dpp=RG_TV_DollarPerPoint(lot);
 
-   if(dpp<=0)
+   if(dpp<=0.0)
       return;
 
    double risk=0.0;
    double reward=0.0;
 
-   if(UseStopLoss && sl>0)
-      risk=
-         MathAbs(entry-sl)/Point*dpp;
+   if(UseStopLoss && sl>0.0)
+      risk=MathAbs(entry-sl)/Point*dpp;
 
-   if(UseTakeProfit && tp>0)
-      reward=
-         MathAbs(tp-entry)/Point*dpp;
+   if(UseTakeProfit && tp>0.0)
+      reward=MathAbs(tp-entry)/Point*dpp;
 
-   string text=
-      (direction==OP_BUY?"BUY":"SELL")+
-      "  Risk $"+
-      DoubleToString(risk,2)+
-      "  Reward $"+
-      DoubleToString(reward,2);
+   double rr=0.0;
 
-   if(risk>0 && reward>0)
-   {
-      double rr=reward/risk;
+   if(risk>0.0 && reward>0.0)
+      rr=reward/risk;
 
-      text+=
-         "  R:R 1:"+
-         DoubleToString(rr,2);
-   }
+   string side=(direction==OP_BUY ? "BUY" : "SELL");
 
-   double decisionPrice=entry;
+   // Entry is a line only: no Entry zone.
+   // Its label stays attached to the Entry line.
+   string entryText=
+      "ENTRY  "+DoubleToString(entry,digits);
 
-   if(sl>0 && tp>0)
-      decisionPrice=(sl+tp)/2.0;
-   else
-   if(sl>0)
-      decisionPrice=sl;
-   else
-   if(tp>0)
-      decisionPrice=tp;
+   if(rr>0.0)
+      entryText+="   R:R 1:"+DoubleToString(rr,2);
 
-   RG_TV_CreateText(
-      RG_TV_DECISION_LABEL,
-      text,
-      decisionPrice,
-      clrGold
+   // Entry remains a line only. Put its text just inside the reward area.
+   double entryInfoPrice=entry;
+   if(tp>entry)
+      entryInfoPrice=entry+(tp-entry)*0.045;
+   else if(sl>0.0 && entry>sl)
+      entryInfoPrice=entry-(entry-sl)*0.045;
+
+   RG_TV_CreateZoneText(
+      RG_TV_PREFIX+"ENTRY_INFO",
+      entryText,
+      entryInfoPrice,
+      clrWhite
+   );
+
+   // Two colored zones only: Risk and Reward.
+   RG_TV_DrawZones(
+      side,
+      entry,
+      sl,
+      tp,
+      risk,
+      reward,
+      rr,
+      digits
    );
 }
 
@@ -357,20 +657,10 @@ void RG_TV_DrawDecision(
 bool RG_TV_ObjectsExist(int direction)
 {
    if(direction==OP_BUY)
-   {
-      return(
-         ObjectFind(0,RG_TV_BUY_ENTRY)>=0 &&
-         ObjectFind(0,RG_TV_BUY_ENTRY_LABEL)>=0
-      );
-   }
+      return(ObjectFind(0,RG_TV_BUY_ENTRY)>=0);
 
    if(direction==OP_SELL)
-   {
-      return(
-         ObjectFind(0,RG_TV_SELL_ENTRY)>=0 &&
-         ObjectFind(0,RG_TV_SELL_ENTRY_LABEL)>=0
-      );
-   }
+      return(ObjectFind(0,RG_TV_SELL_ENTRY)>=0);
 
    return(false);
 }
@@ -436,12 +726,16 @@ void RG_TV_ShowPreview(int direction)
       );
    }
 
-   double lots=RG_CalculatePreviewLot(
-      direction,entry,sl
-   );
+   //=================================================
+   // ALLOWED LOT is the single source for monetary display.
+   // Do NOT recalculate a new lot from Entry/SL here.
+   // The Runtime fixed-lot value is the lot already allowed
+   // by the active RiskGuard risk settings.
+   //=================================================
+   double lots=RG_RuntimeFixedLot();
 
    if(lots<=0.0)
-      lots=RG_RuntimeFixedLot();
+      return;
 
    int digits=
       (int)MarketInfo(Symbol(),MODE_DIGITS);
@@ -488,7 +782,131 @@ void RG_ProcessTradeVisualization()
 }
 
 //====================================================
+// Preview drag helpers
+//====================================================
+
+bool RG_TV_IsPreviewLine(string objectName,int direction)
+{
+   if(direction==OP_BUY)
+      return(
+         objectName==RG_TV_BUY_ENTRY ||
+         objectName==RG_TV_BUY_SL ||
+         objectName==RG_TV_BUY_TP
+      );
+
+   if(direction==OP_SELL)
+      return(
+         objectName==RG_TV_SELL_ENTRY ||
+         objectName==RG_TV_SELL_SL ||
+         objectName==RG_TV_SELL_TP
+      );
+
+   return(false);
+}
+
+bool RG_TV_IsPreviewEntry(string objectName,int direction)
+{
+   return(
+      objectName==
+      (direction==OP_BUY ? RG_TV_BUY_ENTRY : RG_TV_SELL_ENTRY)
+   );
+}
+
+bool RG_TV_IsPreviewSL(string objectName,int direction)
+{
+   return(
+      objectName==
+      (direction==OP_BUY ? RG_TV_BUY_SL : RG_TV_SELL_SL)
+   );
+}
+
+bool RG_TV_IsPreviewTP(string objectName,int direction)
+{
+   return(
+      objectName==
+      (direction==OP_BUY ? RG_TV_BUY_TP : RG_TV_SELL_TP)
+   );
+}
+
+// Read the actual price of the dragged preview object.
+// OBJ_HLINE has one price coordinate, exposed as OBJPROP_PRICE.
+bool RG_TV_ReadDraggedPrice(
+   string objectName,
+   double &price)
+{
+   price=0.0;
+
+   if(ObjectFind(0,objectName)<0)
+      return(false);
+
+   price=ObjectGetDouble(
+      0,
+      objectName,
+      OBJPROP_PRICE
+   );
+
+   if(price<=0.0)
+      return(false);
+
+   int digits=
+      (int)MarketInfo(Symbol(),MODE_DIGITS);
+
+   price=NormalizeDouble(price,digits);
+
+   return(price>0.0);
+}
+
+bool RG_TV_ValidatePreviewPrices(
+   int direction,
+   double entry,
+   double sl,
+   double tp)
+{
+   if(direction!=OP_BUY &&
+      direction!=OP_SELL)
+      return(false);
+
+   if(entry<=0.0)
+      return(false);
+
+   if(UseStopLoss)
+   {
+      if(sl<=0.0)
+         return(false);
+
+      if(direction==OP_BUY && sl>=entry)
+         return(false);
+
+      if(direction==OP_SELL && sl<=entry)
+         return(false);
+   }
+
+   if(UseTakeProfit)
+   {
+      if(tp<=0.0)
+         return(false);
+
+      if(direction==OP_BUY && tp<=entry)
+         return(false);
+
+      if(direction==OP_SELL && tp>=entry)
+         return(false);
+   }
+
+   return(true);
+}
+
+//====================================================
 // Handle draggable PREVIEW lines
+//
+// Design rules:
+// 1) Only the active frozen preview can be dragged.
+// 2) Entry drag moves the complete preview as one unit,
+//    preserving SL / Entry / TP distances.
+// 3) SL or TP drag changes only that protection level.
+// 4) Invalid geometry is rejected and the visual object
+//    is immediately restored to the Runtime snapshot.
+// 5) No broker order is modified by this handler.
 //====================================================
 
 bool RG_TV_HandlePreviewDrag(string objectName)
@@ -496,89 +914,135 @@ bool RG_TV_HandlePreviewDrag(string objectName)
    if(!RG_RuntimePreviewActive())
       return(false);
 
-   int direction=RG_RuntimePreviewDirection();
+   int direction=
+      RG_RuntimePreviewDirection();
 
-   if(direction!=OP_BUY && direction!=OP_SELL)
+   if(direction!=OP_BUY &&
+      direction!=OP_SELL)
       return(false);
 
-   bool isEntry=(objectName==
-      (direction==OP_BUY ? RG_TV_BUY_ENTRY : RG_TV_SELL_ENTRY));
-
-   bool isSL=(objectName==
-      (direction==OP_BUY ? RG_TV_BUY_SL : RG_TV_SELL_SL));
-
-   bool isTP=(objectName==
-      (direction==OP_BUY ? RG_TV_BUY_TP : RG_TV_SELL_TP));
-
-   if(!isEntry && !isSL && !isTP)
+   if(!RG_TV_IsPreviewLine(
+      objectName,
+      direction))
+   {
       return(false);
+   }
 
-   double newPrice=
-      ObjectGetDouble(0,objectName,OBJPROP_PRICE1);
+   double draggedPrice=0.0;
 
-   if(newPrice<=0.0)
+   if(!RG_TV_ReadDraggedPrice(
+      objectName,
+      draggedPrice))
+   {
+      RG_TV_ShowPreview(direction);
       return(true);
-
-   int digits=(int)MarketInfo(Symbol(),MODE_DIGITS);
-   newPrice=NormalizeDouble(newPrice,digits);
-
-   double entry=RG_RuntimePreviewEntry();
-   double sl=RG_RuntimePreviewSL();
-   double tp=RG_RuntimePreviewTP();
-
-   if(isEntry)
-   {
-      double delta=newPrice-entry;
-      entry=newPrice;
-
-      if(sl>0.0) sl=NormalizeDouble(sl+delta,digits);
-      if(tp>0.0) tp=NormalizeDouble(tp+delta,digits);
-   }
-   else if(isSL)
-   {
-      sl=newPrice;
-   }
-   else if(isTP)
-   {
-      tp=newPrice;
    }
 
-   if(entry<=0.0)
+   double entry=
+      RG_RuntimePreviewEntry();
+
+   double sl=
+      RG_RuntimePreviewSL();
+
+   double tp=
+      RG_RuntimePreviewTP();
+
+   int digits=
+      (int)MarketInfo(Symbol(),MODE_DIGITS);
+
+   //=================================================
+   // ENTRY DRAG
+   //=================================================
+   // Entry is an independent draggable level.
+   // IMPORTANT: moving Entry MUST NOT move SL or TP.
+   //
+   // SL and TP are independently draggable objects and their
+   // Runtime values must remain exactly where the user placed them.
+   //=================================================
+
+   if(RG_TV_IsPreviewEntry(
+      objectName,
+      direction))
+   {
+      entry=draggedPrice;
+   }
+   else
+   //=================================================
+   // SL DRAG
+   //=================================================
+   if(RG_TV_IsPreviewSL(
+      objectName,
+      direction))
+   {
+      sl=draggedPrice;
+   }
+   else
+   //=================================================
+   // TP DRAG
+   //=================================================
+   if(RG_TV_IsPreviewTP(
+      objectName,
+      direction))
+   {
+      tp=draggedPrice;
+   }
+
+   entry=NormalizeDouble(entry,digits);
+
+   if(sl>0.0)
+      sl=NormalizeDouble(sl,digits);
+
+   if(tp>0.0)
+      tp=NormalizeDouble(tp,digits);
+
+   //=================================================
+   // Reject invalid geometry.
+   //=================================================
+
+   if(!RG_TV_ValidatePreviewPrices(
+      direction,
+      entry,
+      sl,
+      tp))
+   {
+      // The user moved the visual object into an invalid geometry.
+      // Runtime must remain untouched, so force a redraw from the
+      // original frozen snapshot instead of leaving the line displaced.
+      RG_TV_DeleteTradeVisualization();
+      RG_TV_ShowPreview(direction);
       return(true);
-
-   if(UseStopLoss)
-   {
-      if(sl<=0.0)
-         return(true);
-
-      if(direction==OP_BUY && sl>=entry)
-         return(true);
-
-      if(direction==OP_SELL && sl<=entry)
-         return(true);
    }
 
-   if(UseTakeProfit && tp>0.0)
-   {
-      if(direction==OP_BUY && tp<=entry)
-         return(true);
+   //=================================================
+   // Commit ONLY to Runtime preview state.
+   //=================================================
 
-      if(direction==OP_SELL && tp>=entry)
-         return(true);
-   }
+   RG_RuntimeSetPreviewPrices(
+      entry,
+      sl,
+      tp
+   );
 
-   RG_RuntimeSetPreviewPrices(entry,sl,tp);
+   //=================================================
+   // Recalculate risk-derived lot information.
+   //
+   // % / $ modes:
+   //   risk budget stays fixed, lot changes.
+   //
+   // Lot mode:
+   //   configured fixed lot remains unchanged.
+   //=================================================
 
-   double lot=RG_CalculatePreviewLot(direction,entry,sl);
-
+   // Monetary display is always based on the ALLOWED LOT.
+   // Dragging Entry/SL/TP must not silently replace that lot.
+   double lot=RG_RuntimeFixedLot();
    if(lot<=0.0)
+   {
+      RG_TV_ShowPreview(direction);
       return(true);
+   }
 
-   // In % and $ modes the target risk remains fixed and lot changes.
-   // In Lot mode the lot remains fixed and realized risk changes.
-   if(RG_RuntimeRiskMode()==RG_RISK_LOT)
-      RG_RuntimeSetRiskValue(lot);
-
+   // Draw from the newly committed Runtime snapshot.
    RG_TV_ShowPreview(direction);
 
    return(true);

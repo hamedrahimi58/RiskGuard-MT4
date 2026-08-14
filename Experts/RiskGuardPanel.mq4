@@ -295,6 +295,7 @@ int OnInit()
    // an MQL4 ChartSetInteger property.
 
    EventSetTimer(1);
+   ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,true);
 
    if(!RG_CreatePanel())
    {
@@ -320,6 +321,7 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
+   ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,false);
 
    RG_TV_DeleteTradeVisualization();
    RG_DeletePanel();
@@ -380,6 +382,62 @@ void OnChartEvent(
    const string &sparam)
 {
    //=================================================
+   // HELD RISK +/- BUTTON
+   //=================================================
+   if(id==CHARTEVENT_MOUSE_MOVE)
+   {
+      int mouseX=(int)lparam;
+      int mouseY=(int)dparam;
+
+      // Panel drag is handled first. It only activates from the header.
+      // RG_GUI temporarily disables CHART_MOUSE_SCROLL during an active drag,
+      // then restores the chart's previous scroll state on mouse release.
+      // Risk +/- hold continues to work everywhere else.
+      bool panelDragHandled=
+         RG_GUI_HandlePanelMouseMove(
+            mouseX,
+            mouseY,
+            sparam
+         );
+
+      RG_GUI_HandleRiskMouseHold(
+         mouseX,
+         mouseY,
+         sparam
+      );
+
+      if(panelDragHandled)
+         return;
+
+      return;
+   }
+
+   //=================================================
+   // PREVIEW LINE DRAG
+   //=================================================
+   // Entry / SL / TP preview lines are native MT4 chart
+   // objects. Their final dragged price is delivered here.
+   // Commit it to Runtime, then rebuild the preview and risk UI.
+   if(id==CHARTEVENT_OBJECT_DRAG)
+   {
+      if(RG_TV_HandlePreviewDrag(sparam))
+      {
+         if(RG_RuntimePreviewActive())
+         {
+            RG_GUI_UpdateRiskInfo();
+            RG_MainStatus(
+               "Preview updated - drag Entry / SL / TP then SET"
+            );
+         }
+
+         RG_UpdateGUI();
+         RG_UpdateFooter();
+         ChartRedraw();
+         return;
+      }
+   }
+
+   //=================================================
    // CLICK
    //=================================================
 
@@ -420,6 +478,9 @@ void OnChartEvent(
       // PANEL TITLE = collapse / expand the complete panel
       if(sparam==RG_GUI_PANEL_TOGGLE)
       {
+         if(RG_GUI_ConsumePanelToggleClick())
+            return;
+
          RG_GUI_TogglePanel();
          return;
       }
@@ -640,9 +701,27 @@ void OnChartEvent(
          }
 
          RG_ProcessPositionManager();
+
+         // Rebuild once after SET so the newly created position row,
+         // market/account card and footer use one fresh geometry model.
+         if(ticket>0)
+            RG_CreatePanel();
+         else
+         {
+            RG_UpdateGUI();
+            RG_UpdateFooter();
+         }
+
+         return;
+      }
+
+      // Position P/L display: toggle dollars <-> percent of account balance.
+      if(RG_GUI_IsPositionObject(
+         sparam,RG_GUI_POS_PL))
+      {
+         RG_GUI_TogglePositionPL();
          RG_UpdateGUI();
          RG_UpdateFooter();
-
          return;
       }
 
@@ -803,34 +882,6 @@ void OnChartEvent(
 
          return;
       }
-   }
-
-   //=================================================
-   // PREVIEW DRAG / LIVE NATIVE TRADE DRAG
-   //=================================================
-
-   
-   //
-   // No custom TP/SL drag handling.
-   // Native MT4 owns live order level movement.
-   //=================================================
-
-   if(id==CHARTEVENT_OBJECT_DRAG)
-   {
-      if(RG_TV_HandlePreviewDrag(sparam))
-      {
-         RG_GUI_UpdateRiskControls();
-         RG_GUI_UpdateRiskInfo();
-         RG_UpdateGUI();
-         RG_UpdateFooter();
-         return;
-      }
-
-      // Native MT4 trade-level drag: no custom intervention.
-      RG_UpdateGUI();
-      RG_UpdateFooter();
-
-      return;
    }
 
    if(id==CHARTEVENT_OBJECT_DELETE)
