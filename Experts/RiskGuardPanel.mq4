@@ -3,6 +3,7 @@
 //====================================================
 // RiskGuard MT4
 // Main Expert Advisor
+// Stage 3: Multi-Symbol Positions
 //
 // PRE-TRADE FLOW
 //
@@ -69,24 +70,49 @@ bool RG_PanelBreakEvenTicket(int ticket)
    if(!OrderSelect(ticket,SELECT_BY_TICKET))
       return(false);
 
-   if(OrderSymbol()!=Symbol() ||
-      OrderMagicNumber()!=MagicNumber)
+   // Stage 3: positions are NOT restricted to the chart symbol.
+   // Ticket is the identity; OrderSymbol() supplies the position symbol.
+   if(OrderMagicNumber()!=MagicNumber)
       return(false);
 
-   if(OrderType()!=OP_BUY &&
-      OrderType()!=OP_SELL)
+   int orderType=OrderType();
+
+   if(orderType!=OP_BUY &&
+      orderType!=OP_SELL)
       return(false);
 
-   RefreshRates();
+   string orderSymbol=OrderSymbol();
+
+   double orderBid=
+      MarketInfo(orderSymbol,MODE_BID);
+
+   double orderAsk=
+      MarketInfo(orderSymbol,MODE_ASK);
+
+   int orderDigits=
+      (int)MarketInfo(orderSymbol,MODE_DIGITS);
+
+   double orderPoint=
+      MarketInfo(orderSymbol,MODE_POINT);
+
+   double stopLevel=
+      MarketInfo(orderSymbol,MODE_STOPLEVEL)*
+      orderPoint;
+
+   if(orderBid<=0.0 || orderAsk<=0.0)
+      return(false);
 
    double openPrice=
-      NormalizeDouble(OrderOpenPrice(),Digits);
+      NormalizeDouble(
+         OrderOpenPrice(),
+         orderDigits
+      );
 
    double newSL=openPrice;
 
-   if(OrderType()==OP_BUY)
+   if(orderType==OP_BUY)
    {
-      if(newSL>=Bid)
+      if(newSL>=orderBid-stopLevel)
          return(false);
 
       if(OrderStopLoss()>0 &&
@@ -95,7 +121,7 @@ bool RG_PanelBreakEvenTicket(int ticket)
    }
    else
    {
-      if(newSL<=Ask)
+      if(newSL<=orderAsk+stopLevel)
          return(false);
 
       if(OrderStopLoss()>0 &&
@@ -140,30 +166,54 @@ bool RG_PanelRiskFreeTicket(int ticket)
    if(!OrderSelect(ticket,SELECT_BY_TICKET))
       return(false);
 
-   if(OrderSymbol()!=Symbol() ||
-      OrderMagicNumber()!=MagicNumber)
+   // Stage 3: positions are NOT restricted to the chart symbol.
+   // Ticket is the identity; all market data comes from OrderSymbol().
+   if(OrderMagicNumber()!=MagicNumber)
       return(false);
 
    int type=OrderType();
+
    if(type!=OP_BUY && type!=OP_SELL)
       return(false);
 
-   RefreshRates();
+   string orderSymbol=OrderSymbol();
+
+   double orderBid=
+      MarketInfo(orderSymbol,MODE_BID);
+
+   double orderAsk=
+      MarketInfo(orderSymbol,MODE_ASK);
+
+   int orderDigits=
+      (int)MarketInfo(orderSymbol,MODE_DIGITS);
+
+   double orderPoint=
+      MarketInfo(orderSymbol,MODE_POINT);
 
    double lots=OrderLots();
-   if(lots<=0.0)
+
+   if(lots<=0.0 ||
+      orderBid<=0.0 ||
+      orderAsk<=0.0 ||
+      orderPoint<=0.0)
       return(false);
 
    double commissionCost=MathAbs(OrderCommission());
+
    if(commissionCost<=0.0)
    {
       // No commission means commission-neutral RF is exactly BE.
       return(RG_PanelBreakEvenTicket(ticket));
    }
 
-   double tickValue=MarketInfo(OrderSymbol(),MODE_TICKVALUE);
-   double tickSize =MarketInfo(OrderSymbol(),MODE_TICKSIZE);
-   if(tickValue<=0.0 || tickSize<=0.0)
+   double tickValue=
+      MarketInfo(orderSymbol,MODE_TICKVALUE);
+
+   double tickSize=
+      MarketInfo(orderSymbol,MODE_TICKSIZE);
+
+   if(tickValue<=0.0 ||
+      tickSize<=0.0)
       return(false);
 
    // Price distance whose monetary value equals the commission.
@@ -172,22 +222,31 @@ bool RG_PanelRiskFreeTicket(int ticket)
 
    double openPrice=OrderOpenPrice();
    double newSL=0.0;
-   double stopLevel=MarketInfo(OrderSymbol(),MODE_STOPLEVEL)*Point;
+
+   double stopLevel=
+      MarketInfo(orderSymbol,MODE_STOPLEVEL)*
+      orderPoint;
 
    if(type==OP_BUY)
    {
-      newSL=NormalizeDouble(openPrice+commissionDistance,Digits);
+      newSL=NormalizeDouble(
+         openPrice+commissionDistance,
+         orderDigits
+      );
 
-      // The stop must be below the current Bid by the broker's minimum distance.
-      if(newSL>=Bid-stopLevel)
+      // The stop must be below this position symbol's current Bid.
+      if(newSL>=orderBid-stopLevel)
          return(false);
    }
    else
    {
-      newSL=NormalizeDouble(openPrice-commissionDistance,Digits);
+      newSL=NormalizeDouble(
+         openPrice-commissionDistance,
+         orderDigits
+      );
 
-      // The stop must be above the current Ask by the broker's minimum distance.
-      if(newSL<=Ask+stopLevel)
+      // The stop must be above this position symbol's current Ask.
+      if(newSL<=orderAsk+stopLevel)
          return(false);
    }
 
@@ -214,6 +273,15 @@ bool RG_PanelRiskFreeTicket(int ticket)
 
    return(true);
 }
+
+//====================================================
+// STAGE 3 - MULTI-SYMBOL POSITIONS
+//
+// Position identity is the MT4 ticket.
+// OrderSymbol() is used for all position-specific market data.
+// The chart symbol must never restrict management of another
+// open position belonging to this EA/MagicNumber.
+//====================================================
 
 //====================================================
 // Native MT4 levels

@@ -1007,7 +1007,6 @@ void RG_GUI_ReserveChartSpace(int width)
 bool RG_GUI_IsManagedOrder()
 {
    return(
-      OrderSymbol()==Symbol() &&
       OrderMagicNumber()==MagicNumber &&
       (
          OrderType()==OP_BUY ||
