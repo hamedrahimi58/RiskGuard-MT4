@@ -179,7 +179,7 @@ int RG_SendBuyOrder()
          "RiskGuard BUY",
          MagicNumber,
          0,
-         clrLime
+         clrNONE
       );
 
    if(ticket<0)
@@ -236,7 +236,7 @@ int RG_SendSellOrder()
          "RiskGuard SELL",
          MagicNumber,
          0,
-         clrRed
+         clrNONE
       );
 
    if(ticket<0)

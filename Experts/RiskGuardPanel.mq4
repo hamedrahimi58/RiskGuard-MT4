@@ -380,6 +380,10 @@ bool RG_CreatePendingPreview(int direction)
    if(direction!=OP_BUY && direction!=OP_SELL)
       return(false);
 
+   // Capture the tradable market price ONCE when the button is pressed.
+   // After this point ticks must not reposition the preview.
+   RG_TV_CapturePendingMarketSnapshot();
+
    if(!RG_GUI_CreateRiskPreview(direction))
       return(false);
 
@@ -884,7 +888,7 @@ void OnChartEvent(
             {
                ObjectSetInteger(0,editNames[ei],OBJPROP_READONLY,false);
                ObjectSetInteger(0,editNames[ei],OBJPROP_SELECTABLE,true);
-               ObjectSetInteger(0,editNames[ei],OBJPROP_HIDDEN,false);
+               ObjectSetInteger(0,editNames[ei],OBJPROP_HIDDEN,true);
                ObjectSetInteger(0,editNames[ei],OBJPROP_ZORDER,60000);
                ObjectSetInteger(0,editNames[ei],OBJPROP_SELECTED,
                                 editNames[ei]==sparam);
@@ -949,6 +953,7 @@ void OnChartEvent(
       }
 
       // PENDING BUY: direction only; STOP/LIMIT is automatic.
+      // V2: initial preview is captured from the current Ask exactly once.
       if(sparam==RG_GUI_PENDING_BUY)
       {
          if(!RG_CreatePendingPreview(OP_BUY))
@@ -962,6 +967,7 @@ void OnChartEvent(
       }
 
       // PENDING SELL: direction only; STOP/LIMIT is automatic.
+      // V2: initial preview is captured from the current Bid exactly once.
       if(sparam==RG_GUI_PENDING_SELL)
       {
          if(!RG_CreatePendingPreview(OP_SELL))

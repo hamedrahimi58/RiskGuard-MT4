@@ -94,7 +94,7 @@
 #define RG_GUI_BORDER          clrDimGray
 #define RG_GUI_TEXT            clrWhite
 #define RG_GUI_MUTED           clrSilver
-#define RG_GUI_GREEN           clrLime
+#define RG_GUI_GREEN           C'70,180,80'
 #define RG_GUI_RED             clrTomato
 #define RG_GUI_BLUE            clrDodgerBlue
 #define RG_GUI_ORANGE          clrOrange
@@ -106,22 +106,22 @@
 #define RG_GUI_FONT            "Times New Roman"
 
 #define RG_GUI_TITLE_SIZE      18
-#define RG_GUI_TEXT_SIZE       13
-#define RG_GUI_POSITION_TEXT_SIZE 11
-#define RG_GUI_STATUS_SIZE     12
+#define RG_GUI_TEXT_SIZE       12
+#define RG_GUI_POSITION_TEXT_SIZE 10
+#define RG_GUI_STATUS_SIZE     11
 #define RG_GUI_STATUS_ROW_H    34
-#define RG_GUI_BUTTON_SIZE     12
+#define RG_GUI_BUTTON_SIZE     11
 
 #define RG_GUI_PAD             16
-#define RG_GUI_HEADER_H        56
+#define RG_GUI_HEADER_H        57
 
 #define RG_GUI_INPUT_W         270
 #define RG_GUI_INPUT_H         42
 
-#define RG_GUI_BUTTON_W        170
-#define RG_GUI_BUTTON_H        44
-#define RG_GUI_SMALL_BUTTON_W  150
-#define RG_GUI_SMALL_BUTTON_H  44
+#define RG_GUI_BUTTON_W        169
+#define RG_GUI_BUTTON_H        43
+#define RG_GUI_SMALL_BUTTON_W  149
+#define RG_GUI_SMALL_BUTTON_H  43
 
 #define RG_GUI_ROW_H           110
 #define RG_GUI_SECTION_H       42
@@ -138,9 +138,9 @@
 #define RG_GUI_MODE_Y          0
 
 #define RG_GUI_Z_PANEL         50000
-#define RG_GUI_Z_HEADER        50010
-#define RG_GUI_Z_TEXT          50020
-#define RG_GUI_Z_BUTTON        50030
+#define RG_GUI_Z_HEADER        50011
+#define RG_GUI_Z_TEXT          50019
+#define RG_GUI_Z_BUTTON        50029
 
 int  g_RG_GUI_LastChartWidth=0;
 
@@ -374,6 +374,7 @@ struct RGGuiLayout
    int actionGap;
    int actionX;
    int actionW;
+   int setW;
    int labelX;
    int inputX;
    int rightX;
@@ -465,9 +466,16 @@ void RG_GUI_CalculateLayout(
    L.actionX=
       x+RG_GUI_PAD;
 
-   L.actionW=
+   // Two wider left columns for BUY/PENDING BUY and
+   // SELL/PENDING SELL. SET keeps the right column width.
+   L.setW=
       (L.contentW-
        (2*L.actionGap))/3;
+
+   L.actionW=
+      (L.contentW-
+       L.setW-
+       (2*L.actionGap))/2;
 
    L.labelX=
       x+RG_GUI_PAD;
@@ -516,7 +524,7 @@ void RG_GUI_EnablePreviewEdit(string name)
    ObjectSetInteger(
       0,name,
       OBJPROP_HIDDEN,
-      false
+      true
    );
 
    ObjectSetInteger(
@@ -657,7 +665,7 @@ bool RG_GUI_CreateRect(
    ObjectSetInteger(
       0,name,
       OBJPROP_HIDDEN,
-      false
+      true
    );
 
    ObjectSetInteger(
@@ -753,6 +761,24 @@ bool RG_GUI_CreateButton(
       textColor
    );
 
+   // MT4 compatibility: explicitly apply button text color through
+   // the legacy API as well, preventing terminal/theme defaults from
+   // leaving OBJ_BUTTON text black on some MT4 builds.
+   ObjectSetText(
+      name,
+      text,
+      RG_GUI_BUTTON_SIZE,
+      RG_GUI_FONT,
+      textColor
+   );
+
+   // Re-assert the modern property after ObjectSetText().
+   ObjectSetInteger(
+      0,name,
+      OBJPROP_COLOR,
+      textColor
+   );
+
    ObjectSetInteger(
       0,name,
       OBJPROP_BORDER_COLOR,
@@ -774,7 +800,7 @@ bool RG_GUI_CreateButton(
    ObjectSetInteger(
       0,name,
       OBJPROP_HIDDEN,
-      false
+      true
    );
 
    ObjectSetInteger(
@@ -879,7 +905,7 @@ bool RG_GUI_CreateText(
    ObjectSetInteger(
       0,name,
       OBJPROP_HIDDEN,
-      false
+      true
    );
 
    ObjectSetInteger(
@@ -1310,7 +1336,7 @@ void RG_GUI_DrawPositionRow(
       buttonW,
       buttonH,
       RG_GUI_BLUE,
-      clrWhite,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
 
@@ -1323,7 +1349,7 @@ void RG_GUI_DrawPositionRow(
       buttonW,
       buttonH,
       RG_GUI_CYAN,
-      clrBlack,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
 
@@ -1336,7 +1362,7 @@ void RG_GUI_DrawPositionRow(
       buttonW,
       buttonH,
       RG_GUI_YELLOW,
-      clrBlack,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
 
@@ -1349,7 +1375,7 @@ void RG_GUI_DrawPositionRow(
       buttonW,
       buttonH,
       RG_GUI_ORANGE,
-      clrBlack,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
 
@@ -1362,7 +1388,7 @@ void RG_GUI_DrawPositionRow(
       buttonW,
       buttonH,
       RG_GUI_RED,
-      clrWhite,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
 }
@@ -2392,16 +2418,18 @@ void RG_GUI_UpdatePositionSectionLayout()
    if(y<5)
       y=5;
 
-   int rows=MaxOpenPositions;
+   // Layout is based on ACTUAL open managed positions.
+   // MaxOpenPositions is a trading limit, not a UI row reservation.
+   int count=
+      RG_GUI_GetPositionCount();
+
+   int rows=count;
 
    if(rows<1)
       rows=1;
 
    if(rows>8)
       rows=8;
-
-   int count=
-      RG_GUI_GetPositionCount();
 
    RGGuiLayout L;
 
@@ -2783,16 +2811,18 @@ bool RG_CreatePanel()
       return(true);
    }
 
-   int rows=MaxOpenPositions;
+   // Layout is based on ACTUAL open managed positions.
+   // MaxOpenPositions is a trading limit, not a UI row reservation.
+   int count=
+      RG_GUI_GetPositionCount();
+
+   int rows=count;
 
    if(rows<1)
       rows=1;
 
    if(rows>8)
       rows=8;
-
-   int count=
-      RG_GUI_GetPositionCount();
 
    RGGuiLayout L;
 
@@ -3004,7 +3034,7 @@ bool RG_CreatePanel()
       L.actionW,
       RG_GUI_BUTTON_H,
       RG_GUI_GREEN,
-      clrBlack,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
 
@@ -3018,7 +3048,7 @@ bool RG_CreatePanel()
       L.actionW,
       RG_GUI_BUTTON_H,
       RG_GUI_RED,
-      clrWhite,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
 
@@ -3029,10 +3059,10 @@ bool RG_CreatePanel()
       (L.actionW+
        L.actionGap)*2,
       L.primaryY,
-      L.actionW,
-      RG_GUI_BUTTON_H,
+      L.setW,
+      (RG_GUI_BUTTON_H*2)+8,
       RG_GUI_BLUE,
-      clrWhite,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
 
@@ -3049,9 +3079,11 @@ bool RG_CreatePanel()
       L.actionW,
       RG_GUI_BUTTON_H,
       RG_GUI_GREEN,
-      clrBlack,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
+
+   ObjectSetInteger(0,RG_GUI_PENDING_BUY,OBJPROP_FONTSIZE,10);
 
    RG_GUI_CreateButton(
       RG_GUI_PENDING_SELL,
@@ -3063,9 +3095,11 @@ bool RG_CreatePanel()
       L.actionW,
       RG_GUI_BUTTON_H,
       RG_GUI_RED,
-      clrWhite,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
+
+   ObjectSetInteger(0,RG_GUI_PENDING_SELL,OBJPROP_FONTSIZE,10);
 
    //=================================================
    // UTILITY ACTIONS
@@ -3104,10 +3138,10 @@ bool RG_CreatePanel()
       (L.actionW+
        L.actionGap)*2,
       L.utilityY,
-      L.actionW,
+      L.setW,
       RG_GUI_BUTTON_H,
       RG_GUI_RED,
-      clrWhite,
+      clrBlack,
       RG_GUI_Z_BUTTON
    );
 

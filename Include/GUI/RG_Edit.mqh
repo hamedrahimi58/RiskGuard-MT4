@@ -39,7 +39,7 @@ bool RG_CreateEdit(
    ObjectSetInteger(0,name,OBJPROP_READONLY,false);
    ObjectSetInteger(0,name,OBJPROP_SELECTABLE,true);
    ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
-   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
    ObjectSetInteger(0,name,OBJPROP_BACK,false);
    ObjectSetInteger(0,name,OBJPROP_ZORDER,RG_EDIT_ZORDER);
 

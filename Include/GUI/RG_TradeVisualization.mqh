@@ -50,9 +50,52 @@
 #define RG_TV_GRADIENT_STEPS    12
 
 int    g_RG_TV_LastDirection=-1;
+bool   g_RG_TV_PendingPreview=false;
 double g_RG_TV_LastEntry=0.0;
 double g_RG_TV_LastSL=0.0;
 double g_RG_TV_LastTP=0.0;
+
+// Pending Preview V2 snapshot: captured once when the Pending action is
+// pressed. These values are never refreshed by ticks.
+double g_RG_TV_PendingBidSnapshot=0.0;
+double g_RG_TV_PendingAskSnapshot=0.0;
+
+int RG_TV_GetPendingTypeFromSnapshot(int direction,double entry)
+{
+   if(direction==OP_BUY)
+   {
+      if(g_RG_TV_PendingAskSnapshot>0.0)
+      {
+         if(entry>g_RG_TV_PendingAskSnapshot) return(OP_BUYSTOP);
+         if(entry<g_RG_TV_PendingAskSnapshot) return(OP_BUYLIMIT);
+      }
+   }
+   else if(direction==OP_SELL)
+   {
+      if(g_RG_TV_PendingBidSnapshot>0.0)
+      {
+         if(entry<g_RG_TV_PendingBidSnapshot) return(OP_SELLSTOP);
+         if(entry>g_RG_TV_PendingBidSnapshot) return(OP_SELLLIMIT);
+      }
+   }
+
+   return(-1);
+}
+
+void RG_TV_CapturePendingMarketSnapshot()
+{
+   g_RG_TV_PendingBidSnapshot=MarketInfo(Symbol(),MODE_BID);
+   g_RG_TV_PendingAskSnapshot=MarketInfo(Symbol(),MODE_ASK);
+}
+
+//====================================================
+// Pending preview mode
+//====================================================
+
+void RG_TV_SetPendingPreview(bool enabled)
+{
+   g_RG_TV_PendingPreview=enabled;
+}
 
 //====================================================
 // Delete
@@ -75,6 +118,7 @@ void RG_TV_DeleteTradeVisualization()
    }
 
    g_RG_TV_LastDirection=-1;
+   g_RG_TV_PendingPreview=false;
    g_RG_TV_LastEntry=0.0;
    g_RG_TV_LastSL=0.0;
    g_RG_TV_LastTP=0.0;
@@ -128,7 +172,7 @@ bool RG_TV_CreateLine(
    ObjectSetInteger(0,name,OBJPROP_SELECTABLE,true);
    ObjectSetInteger(0,name,OBJPROP_SELECTED,true);
 
-   ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
    ObjectSetInteger(0,name,OBJPROP_ZORDER,65000);
 
    return(true);
@@ -620,6 +664,22 @@ void RG_TV_DrawDecision(
    string entryText=
       "ENTRY  "+DoubleToString(entry,digits);
 
+   if(g_RG_TV_PendingPreview)
+   {
+      // Pending Preview V2:
+      // The preview is frozen at the market price captured when the
+      // Pending button was pressed. Live ticks must NOT move or rewrite
+      // the initial preview. The pending type is therefore also based on
+      // the captured market reference until the trader drags Entry.
+      int pendingType=RG_TV_GetPendingTypeFromSnapshot(direction,entry);
+
+      if(pendingType==OP_BUYSTOP) entryText="BUY STOP  "+DoubleToString(entry,digits);
+      else if(pendingType==OP_BUYLIMIT) entryText="BUY LIMIT  "+DoubleToString(entry,digits);
+      else if(pendingType==OP_SELLSTOP) entryText="SELL STOP  "+DoubleToString(entry,digits);
+      else if(pendingType==OP_SELLLIMIT) entryText="SELL LIMIT  "+DoubleToString(entry,digits);
+      else entryText="PENDING  "+DoubleToString(entry,digits);
+   }
+
    if(rr>0.0)
       entryText+="   R:R 1:"+DoubleToString(rr,2);
 
@@ -901,8 +961,8 @@ bool RG_TV_ValidatePreviewPrices(
 //
 // Design rules:
 // 1) Only the active frozen preview can be dragged.
-// 2) Entry drag moves the complete preview as one unit,
-//    preserving SL / Entry / TP distances.
+// 2) Entry drag changes ONLY Entry.
+//    SL and TP remain independently draggable.
 // 3) SL or TP drag changes only that protection level.
 // 4) Invalid geometry is rejected and the visual object
 //    is immediately restored to the Runtime snapshot.
