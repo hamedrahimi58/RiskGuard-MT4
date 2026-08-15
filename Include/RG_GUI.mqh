@@ -39,6 +39,8 @@
 
 #define RG_GUI_BUY             RG_PREFIX+"BUY"
 #define RG_GUI_SELL            RG_PREFIX+"SELL"
+#define RG_GUI_PENDING_BUY     RG_PREFIX+"PENDING_BUY"
+#define RG_GUI_PENDING_SELL    RG_PREFIX+"PENDING_SELL"
 #define RG_GUI_SET             RG_PREFIX+"SET"
 #define RG_GUI_CANCEL          RG_PREFIX+"CANCEL"
 #define RG_GUI_CLOSE           RG_PREFIX+"CLOSE_ALL"
@@ -356,7 +358,9 @@ struct RGGuiLayout
 {
    int statusY;
    int primaryY;
+   int pendingY;
    int fieldsY;
+   int utilityY;
    int fieldStep;
    int modeY;
    int riskY;
@@ -411,16 +415,24 @@ void RG_GUI_CalculateLayout(
       46+
       10;
 
-   L.fieldsY=
+   L.pendingY=
       L.primaryY+
       RG_GUI_BUTTON_H+
       8;
+
+   L.utilityY=
+      L.pendingY+
+      RG_GUI_BUTTON_H+
+      8;
+
+   L.fieldsY=
+      L.utilityY;
 
    L.fieldStep=0;
    L.modeY=0;
 
    L.positionY=
-      L.fieldsY+
+      L.utilityY+
       RG_GUI_BUTTON_H+
       10;
 
@@ -3025,6 +3037,37 @@ bool RG_CreatePanel()
    );
 
    //=================================================
+   // PENDING ACTIONS
+   // Direction only. EA detects STOP vs LIMIT from Entry.
+   //=================================================
+
+   RG_GUI_CreateButton(
+      RG_GUI_PENDING_BUY,
+      "PENDING BUY",
+      L.actionX,
+      L.pendingY,
+      L.actionW,
+      RG_GUI_BUTTON_H,
+      RG_GUI_GREEN,
+      clrBlack,
+      RG_GUI_Z_BUTTON
+   );
+
+   RG_GUI_CreateButton(
+      RG_GUI_PENDING_SELL,
+      "PENDING SELL",
+      L.actionX+
+      L.actionW+
+      L.actionGap,
+      L.pendingY,
+      L.actionW,
+      RG_GUI_BUTTON_H,
+      RG_GUI_RED,
+      clrWhite,
+      RG_GUI_Z_BUTTON
+   );
+
+   //=================================================
    // UTILITY ACTIONS
    //=================================================
 
@@ -3032,7 +3075,7 @@ bool RG_CreatePanel()
       RG_GUI_CLOSE,
       "CLOSE ALL",
       L.actionX,
-      L.fieldsY,
+      L.utilityY,
       L.actionW,
       RG_GUI_BUTTON_H,
       RG_GUI_ORANGE,
@@ -3046,7 +3089,7 @@ bool RG_CreatePanel()
       L.actionX+
       L.actionW+
       L.actionGap,
-      L.fieldsY,
+      L.utilityY,
       L.actionW,
       RG_GUI_BUTTON_H,
       RG_GUI_YELLOW,
@@ -3060,7 +3103,7 @@ bool RG_CreatePanel()
       L.actionX+
       (L.actionW+
        L.actionGap)*2,
-      L.fieldsY,
+      L.utilityY,
       L.actionW,
       RG_GUI_BUTTON_H,
       RG_GUI_RED,

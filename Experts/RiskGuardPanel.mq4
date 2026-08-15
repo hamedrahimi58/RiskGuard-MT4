@@ -41,6 +41,358 @@ double g_RG_OriginalShiftSize=0.0;
 bool   g_RG_ChartStateCaptured=false;
 
 //====================================================
+// Stage 4A pending UI state
+//====================================================
+
+bool g_RG_PendingPreview=false;
+int  g_RG_PendingDirection=-1;
+
+//====================================================
+// STAGE 4A - PENDING ORDER ENGINE
+//
+// This layer is intentionally independent from GUI/Preview.
+// Pending order identity is determined by order type + symbol.
+// All broker constraints are read from the target symbol.
+// Stage 4A does NOT alter the existing market-order flow.
+//====================================================
+
+bool RG_PendingTypeValid(int pendingType)
+{
+   return(
+      pendingType==OP_BUYSTOP  ||
+      pendingType==OP_BUYLIMIT ||
+      pendingType==OP_SELLSTOP ||
+      pendingType==OP_SELLLIMIT
+   );
+}
+
+// Validate the requested pending entry against the target symbol.
+bool RG_ValidatePendingEntry(
+   string symbol,
+   int pendingType,
+   double entryPrice)
+{
+   if(symbol=="")
+      return(false);
+
+   if(!RG_PendingTypeValid(pendingType))
+      return(false);
+
+   double bid=MarketInfo(symbol,MODE_BID);
+   double ask=MarketInfo(symbol,MODE_ASK);
+
+   int digits=(int)MarketInfo(symbol,MODE_DIGITS);
+   double point=MarketInfo(symbol,MODE_POINT);
+
+   int stopLevelPoints=(int)MarketInfo(symbol,MODE_STOPLEVEL);
+   int freezeLevelPoints=(int)MarketInfo(symbol,MODE_FREEZELEVEL);
+
+   if(bid<=0.0 || ask<=0.0 || point<=0.0)
+      return(false);
+
+   entryPrice=NormalizeDouble(entryPrice,digits);
+
+   double minimumDistance=
+      MathMax(stopLevelPoints,freezeLevelPoints)*
+      point;
+
+   if(pendingType==OP_BUYSTOP)
+   {
+      if(entryPrice<=ask)
+         return(false);
+
+      if((entryPrice-ask)<minimumDistance)
+         return(false);
+   }
+
+   if(pendingType==OP_BUYLIMIT)
+   {
+      if(entryPrice>=ask)
+         return(false);
+
+      if((ask-entryPrice)<minimumDistance)
+         return(false);
+   }
+
+   if(pendingType==OP_SELLSTOP)
+   {
+      if(entryPrice>=bid)
+         return(false);
+
+      if((bid-entryPrice)<minimumDistance)
+         return(false);
+   }
+
+   if(pendingType==OP_SELLLIMIT)
+   {
+      if(entryPrice<=bid)
+         return(false);
+
+      if((entryPrice-bid)<minimumDistance)
+         return(false);
+   }
+
+   return(true);
+}
+
+// Validate SL/TP against the pending entry and target symbol.
+// Zero means "not set".
+bool RG_ValidatePendingStops(
+   string symbol,
+   int pendingType,
+   double entryPrice,
+   double sl,
+   double tp)
+{
+   if(symbol=="")
+      return(false);
+
+   if(!RG_PendingTypeValid(pendingType))
+      return(false);
+
+   int digits=(int)MarketInfo(symbol,MODE_DIGITS);
+   double point=MarketInfo(symbol,MODE_POINT);
+
+   if(point<=0.0)
+      return(false);
+
+   entryPrice=NormalizeDouble(entryPrice,digits);
+   sl=NormalizeDouble(sl,digits);
+   tp=NormalizeDouble(tp,digits);
+
+   bool isBuy=
+      (pendingType==OP_BUYSTOP ||
+       pendingType==OP_BUYLIMIT);
+
+   if(isBuy)
+   {
+      if(sl>0.0 && sl>=entryPrice)
+         return(false);
+
+      if(tp>0.0 && tp<=entryPrice)
+         return(false);
+   }
+   else
+   {
+      if(sl>0.0 && sl<=entryPrice)
+         return(false);
+
+      if(tp>0.0 && tp>=entryPrice)
+         return(false);
+   }
+
+   return(true);
+}
+
+// Validate the complete Stage 4A pending request.
+bool RG_ValidatePendingRequest(
+   string symbol,
+   int pendingType,
+   double lots,
+   double entryPrice,
+   double sl,
+   double tp)
+{
+   if(!RG_PendingTypeValid(pendingType))
+      return(false);
+
+   if(symbol=="")
+      return(false);
+
+   if(lots<=0.0)
+      return(false);
+
+   double minLot=
+      MarketInfo(symbol,MODE_MINLOT);
+
+   double maxLot=
+      MarketInfo(symbol,MODE_MAXLOT);
+
+   double lotStep=
+      MarketInfo(symbol,MODE_LOTSTEP);
+
+   if(minLot<=0.0 ||
+      maxLot<=0.0 ||
+      lotStep<=0.0)
+      return(false);
+
+   if(lots<minLot-0.00000001 ||
+      lots>maxLot+0.00000001)
+      return(false);
+
+   double lotUnits=
+      lots/lotStep;
+
+   if(MathAbs(lotUnits-MathRound(lotUnits))>0.000001)
+      return(false);
+
+   if(!RG_ValidatePendingEntry(
+      symbol,
+      pendingType,
+      entryPrice))
+      return(false);
+
+   if(!RG_ValidatePendingStops(
+      symbol,
+      pendingType,
+      entryPrice,
+      sl,
+      tp))
+      return(false);
+
+   return(true);
+}
+
+// Stage 4A native pending sender.
+// GUI/Preview/Risk calculations will call this in later sub-stages.
+int RG_SendPendingOrder(
+   string symbol,
+   int pendingType,
+   double lots,
+   double entryPrice,
+   double sl,
+   double tp,
+   string comment)
+{
+   if(!RG_ValidatePendingRequest(
+      symbol,
+      pendingType,
+      lots,
+      entryPrice,
+      sl,
+      tp))
+   {
+      Print(
+         "RiskGuard Pending validation failed. Symbol=",
+         symbol,
+         " Type=",
+         pendingType
+      );
+
+      return(-1);
+   }
+
+   int digits=(int)MarketInfo(symbol,MODE_DIGITS);
+
+   double price=
+      NormalizeDouble(entryPrice,digits);
+
+   double stopLoss=
+      (sl>0.0 ?
+       NormalizeDouble(sl,digits) :
+       0.0);
+
+   double takeProfit=
+      (tp>0.0 ?
+       NormalizeDouble(tp,digits) :
+       0.0);
+
+   ResetLastError();
+
+   int ticket=OrderSend(
+      symbol,
+      pendingType,
+      lots,
+      price,
+      0,
+      stopLoss,
+      takeProfit,
+      comment,
+      MagicNumber,
+      0,
+      clrNONE
+   );
+
+   if(ticket<0)
+   {
+      int error=GetLastError();
+
+      Print(
+         "RiskGuard Pending OrderSend failed. ",
+         "Symbol=",symbol,
+         " Type=",pendingType,
+         " Lots=",DoubleToString(lots,2),
+         " Entry=",DoubleToString(price,digits),
+         " SL=",DoubleToString(stopLoss,digits),
+         " TP=",DoubleToString(takeProfit,digits),
+         " Error=",error
+      );
+
+      return(-1);
+   }
+
+   Print(
+      "RiskGuard Pending order opened. ",
+      "Ticket=",ticket,
+      " Symbol=",symbol,
+      " Type=",pendingType
+   );
+
+   return(ticket);
+}
+
+//====================================================
+// Stage 4A Pending UI helpers
+//====================================================
+
+void RG_ClearPendingMode()
+{
+   g_RG_PendingPreview=false;
+   g_RG_PendingDirection=-1;
+}
+
+int RG_DetectPendingType(int direction,double entry)
+{
+   if(direction!=OP_BUY && direction!=OP_SELL)
+      return(-1);
+
+   double bid=MarketInfo(Symbol(),MODE_BID);
+   double ask=MarketInfo(Symbol(),MODE_ASK);
+
+   if(bid<=0.0 || ask<=0.0 || entry<=0.0)
+      return(-1);
+
+   if(direction==OP_BUY)
+   {
+      if(entry>ask) return(OP_BUYSTOP);
+      if(entry<ask) return(OP_BUYLIMIT);
+   }
+   else
+   {
+      if(entry<bid) return(OP_SELLSTOP);
+      if(entry>bid) return(OP_SELLLIMIT);
+   }
+
+   return(-1);
+}
+
+string RG_PendingTypeName(int pendingType)
+{
+   if(pendingType==OP_BUYSTOP) return("BUY STOP");
+   if(pendingType==OP_BUYLIMIT) return("BUY LIMIT");
+   if(pendingType==OP_SELLSTOP) return("SELL STOP");
+   if(pendingType==OP_SELLLIMIT) return("SELL LIMIT");
+   return("PENDING");
+}
+
+bool RG_CreatePendingPreview(int direction)
+{
+   if(direction!=OP_BUY && direction!=OP_SELL)
+      return(false);
+
+   if(!RG_GUI_CreateRiskPreview(direction))
+      return(false);
+
+   g_RG_PendingPreview=true;
+   g_RG_PendingDirection=direction;
+
+   RG_TV_ShowPreview(direction);
+   RG_GUI_UpdateRiskInfo();
+
+   return(true);
+}
+
+//====================================================
 // Status
 //====================================================
 
@@ -562,41 +914,63 @@ void OnChartEvent(
          return;
       }
 
-      // BUY = PREVIEW ONLY
+      // BUY = MARKET PREVIEW ONLY
       if(sparam==RG_GUI_BUY)
       {
+         RG_ClearPendingMode();
+
          if(!RG_GUI_CreateRiskPreview(OP_BUY))
          {
             RG_MainStatus("BUY Preview failed - ATR/risk unavailable");
             return;
          }
 
-         RG_MainStatus(
-            "BUY Preview - drag Entry / SL / TP then SET"
-         );
-
+         RG_MainStatus("BUY Preview - drag Entry / SL / TP then SET");
          RG_TV_ShowPreview(OP_BUY);
          RG_GUI_UpdateRiskInfo();
-
          return;
       }
 
-      // SELL = PREVIEW ONLY
+      // SELL = MARKET PREVIEW ONLY
       if(sparam==RG_GUI_SELL)
       {
+         RG_ClearPendingMode();
+
          if(!RG_GUI_CreateRiskPreview(OP_SELL))
          {
             RG_MainStatus("SELL Preview failed - ATR/risk unavailable");
             return;
          }
 
-         RG_MainStatus(
-            "SELL Preview - drag Entry / SL / TP then SET"
-         );
-
+         RG_MainStatus("SELL Preview - drag Entry / SL / TP then SET");
          RG_TV_ShowPreview(OP_SELL);
          RG_GUI_UpdateRiskInfo();
+         return;
+      }
 
+      // PENDING BUY: direction only; STOP/LIMIT is automatic.
+      if(sparam==RG_GUI_PENDING_BUY)
+      {
+         if(!RG_CreatePendingPreview(OP_BUY))
+         {
+            RG_MainStatus("Pending BUY Preview failed - ATR/risk unavailable");
+            return;
+         }
+
+         RG_MainStatus("Pending BUY Preview - drag Entry / SL / TP then SET");
+         return;
+      }
+
+      // PENDING SELL: direction only; STOP/LIMIT is automatic.
+      if(sparam==RG_GUI_PENDING_SELL)
+      {
+         if(!RG_CreatePendingPreview(OP_SELL))
+         {
+            RG_MainStatus("Pending SELL Preview failed - ATR/risk unavailable");
+            return;
+         }
+
+         RG_MainStatus("Pending SELL Preview - drag Entry / SL / TP then SET");
          return;
       }
 
@@ -668,6 +1042,7 @@ void OnChartEvent(
       // CANCEL = clear preview, no order
       if(sparam==RG_GUI_CANCEL)
       {
+         RG_ClearPendingMode();
          RG_RuntimeClearPreview();
          RG_TV_DeleteTradeVisualization();
 
@@ -701,16 +1076,11 @@ void OnChartEvent(
       // SET = EXECUTE SELECTED PREVIEW
       if(sparam==RG_GUI_SET)
       {
-         int direction=
-            RG_RuntimePreviewDirection();
+         int direction=RG_RuntimePreviewDirection();
 
-         if(direction!=OP_BUY &&
-            direction!=OP_SELL)
+         if(direction!=OP_BUY && direction!=OP_SELL)
          {
-            RG_MainStatus(
-               "SET: select BUY or SELL first"
-            );
-
+            RG_MainStatus("SET: select BUY / SELL or PENDING first");
             return;
          }
 
@@ -718,60 +1088,113 @@ void OnChartEvent(
 
          if(!RG_GUI_ApplySettings())
          {
-            RG_MainStatus(
-               "SET failed: check Preview / Risk / ATR"
-            );
-
+            RG_MainStatus("SET failed: check Preview / Risk / ATR");
             return;
          }
 
          int ticket=-1;
 
-         if(direction==OP_BUY)
+         if(g_RG_PendingPreview &&
+            g_RG_PendingDirection==direction)
          {
-            RG_MainStatus(
-               "SET: Sending BUY..."
+            double entry=RG_RuntimePreviewEntry();
+            double sl=RG_RuntimePreviewSL();
+            double tp=RG_RuntimePreviewTP();
+
+            double lot=RG_GUI_CalculateRiskLot(
+               direction,entry,sl
             );
 
-            ticket=RG_SendBuyOrder();
+            int pendingType=RG_DetectPendingType(
+               direction,entry
+            );
+
+            if(pendingType<0)
+            {
+               RG_MainStatus(
+                  "Pending SET failed: Entry must be above/below market"
+               );
+               RG_TV_ShowPreview(direction);
+               return;
+            }
+
+            if(lot<=0.0)
+            {
+               RG_MainStatus("Pending SET failed: invalid allowed lot");
+               RG_TV_ShowPreview(direction);
+               return;
+            }
+
+            RG_MainStatus(
+               "SET: Sending "+
+               RG_PendingTypeName(pendingType)+
+               "..."
+            );
+
+            ticket=RG_SendPendingOrder(
+               Symbol(),
+               pendingType,
+               lot,
+               entry,
+               sl,
+               tp,
+               "RiskGuard Pending"
+            );
+
+            if(ticket>0)
+            {
+               RG_RuntimeClearPreview();
+               RG_TV_DeleteTradeVisualization();
+               RG_ClearPendingMode();
+
+               RG_MainStatus(
+                  RG_PendingTypeName(pendingType)+
+                  " #"+
+                  IntegerToString(ticket)
+               );
+            }
+            else
+            {
+               RG_MainStatus(
+                  "Pending order failed - SET retry available"
+               );
+               RG_TV_ShowPreview(direction);
+            }
          }
          else
          {
-            RG_MainStatus(
-               "SET: Sending SELL..."
-            );
+            if(direction==OP_BUY)
+            {
+               RG_MainStatus("SET: Sending BUY...");
+               ticket=RG_SendBuyOrder();
+            }
+            else
+            {
+               RG_MainStatus("SET: Sending SELL...");
+               ticket=RG_SendSellOrder();
+            }
 
-            ticket=RG_SendSellOrder();
-         }
+            if(ticket>0)
+            {
+               RG_RuntimeClearPreview();
+               RG_TV_DeleteTradeVisualization();
+               RG_EnableNativeTradeLevels();
+               RG_ClearPendingMode();
 
-         if(ticket>0)
-         {
-            RG_RuntimeClearPreview();
-            RG_TV_DeleteTradeVisualization();
-
-            RG_EnableNativeTradeLevels();
-
-            RG_MainStatus(
-               (direction==OP_BUY ?
-                "BUY Opened #" :
-                "SELL Opened #")+
-               IntegerToString(ticket)
-            );
-         }
-         else
-         {
-            // Keep preview for retry.
-            RG_MainStatus(
-               "Order failed - SET retry available"
-            );
-
-            RG_TV_ShowPreview(direction);
+               RG_MainStatus(
+                  (direction==OP_BUY ? "BUY Opened #" : "SELL Opened #")+
+                  IntegerToString(ticket)
+               );
+            }
+            else
+            {
+               RG_MainStatus("Order failed - SET retry available");
+               RG_TV_ShowPreview(direction);
+            }
          }
 
          RG_ProcessPositionManager();
 
-         // Rebuild once after SET so the newly created position row,
-         // market/account card and footer use one fresh geometry model.
          if(ticket>0)
             RG_CreatePanel();
          else
