@@ -88,6 +88,23 @@ void RG_TV_CapturePendingMarketSnapshot()
    g_RG_TV_PendingAskSnapshot=MarketInfo(Symbol(),MODE_ASK);
 }
 
+
+void RG_TV_SetPendingMarketSnapshot(double bid,double ask)
+{
+   g_RG_TV_PendingBidSnapshot=bid;
+   g_RG_TV_PendingAskSnapshot=ask;
+}
+
+double RG_TV_PendingBidSnapshot()
+{
+   return(g_RG_TV_PendingBidSnapshot);
+}
+
+double RG_TV_PendingAskSnapshot()
+{
+   return(g_RG_TV_PendingAskSnapshot);
+}
+
 //====================================================
 // Pending preview mode
 //====================================================

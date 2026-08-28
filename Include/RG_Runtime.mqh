@@ -34,6 +34,92 @@ double g_RG_PreviewTP    = 0.0;
 bool g_RG_PreviewUsePips = false;
 
 //====================================================
+// Preview persistence across chart timeframe changes
+//====================================================
+
+string RG_RuntimePreviewGVPrefix()
+{
+   return("RiskGuard.Preview."+IntegerToString((int)ChartID())+"."+Symbol()+".");
+}
+
+void RG_RuntimeSavePreviewSnapshot()
+{
+   if(!RG_RuntimePreviewActive())
+      return;
+
+   string p=RG_RuntimePreviewGVPrefix();
+
+   GlobalVariableSet(p+"active",1.0);
+   GlobalVariableSet(p+"direction",(double)RG_RuntimePreviewDirection());
+   GlobalVariableSet(p+"entry",RG_RuntimePreviewEntry());
+   GlobalVariableSet(p+"sl",RG_RuntimePreviewSL());
+   GlobalVariableSet(p+"tp",RG_RuntimePreviewTP());
+   GlobalVariableSet(p+"usepips",RG_RuntimePreviewUsePips()?1.0:0.0);
+   GlobalVariableSet(p+"riskmode",(double)RG_RuntimeRiskMode());
+   GlobalVariableSet(p+"riskvalue",RG_RuntimeRiskValue());
+   GlobalVariableSet(p+"fixedlot",RG_RuntimeFixedLot());
+   GlobalVariableSet(p+"slpoints",(double)RG_RuntimeStopLoss());
+   GlobalVariableSet(p+"tppoints",(double)RG_RuntimeTakeProfit());
+}
+
+bool RG_RuntimeRestorePreviewSnapshot()
+{
+   string p=RG_RuntimePreviewGVPrefix();
+
+   if(!GlobalVariableCheck(p+"active") ||
+      GlobalVariableGet(p+"active")<0.5)
+      return(false);
+
+   int direction=(int)GlobalVariableGet(p+"direction");
+   double entry=GlobalVariableGet(p+"entry");
+   double sl=GlobalVariableGet(p+"sl");
+   double tp=GlobalVariableGet(p+"tp");
+
+   if((direction!=OP_BUY && direction!=OP_SELL) || entry<=0.0)
+      return(false);
+
+   RG_RuntimeInit();
+
+   if(GlobalVariableCheck(p+"riskmode"))
+      g_RG_RiskMode=(ENUM_RG_RISK_MODE)(int)GlobalVariableGet(p+"riskmode");
+   if(GlobalVariableCheck(p+"riskvalue"))
+      g_RG_RiskValue=GlobalVariableGet(p+"riskvalue");
+   if(GlobalVariableCheck(p+"fixedlot"))
+      g_RG_FixedLot=GlobalVariableGet(p+"fixedlot");
+   if(GlobalVariableCheck(p+"slpoints"))
+      g_RG_StopLoss=(int)GlobalVariableGet(p+"slpoints");
+   if(GlobalVariableCheck(p+"tppoints"))
+      g_RG_TakeProfit=(int)GlobalVariableGet(p+"tppoints");
+
+   g_RG_PreviewDirection=direction;
+   g_RG_PreviewActive=true;
+   g_RG_PreviewEntry=entry;
+   g_RG_PreviewSL=sl;
+   g_RG_PreviewTP=tp;
+   g_RG_PreviewUsePips=(GlobalVariableCheck(p+"usepips") && GlobalVariableGet(p+"usepips")>0.5);
+   g_RG_SettingsApplied=false;
+
+   return(true);
+}
+
+void RG_RuntimeClearPreviewSnapshot()
+{
+   string p=RG_RuntimePreviewGVPrefix();
+
+   GlobalVariableDel(p+"active");
+   GlobalVariableDel(p+"direction");
+   GlobalVariableDel(p+"entry");
+   GlobalVariableDel(p+"sl");
+   GlobalVariableDel(p+"tp");
+   GlobalVariableDel(p+"usepips");
+   GlobalVariableDel(p+"riskmode");
+   GlobalVariableDel(p+"riskvalue");
+   GlobalVariableDel(p+"fixedlot");
+   GlobalVariableDel(p+"slpoints");
+   GlobalVariableDel(p+"tppoints");
+}
+
+//====================================================
 // Init
 //====================================================
 

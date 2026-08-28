@@ -30,6 +30,7 @@
 #include <Trade/RG_TakeProfit.mqh>
 
 #include <RG_GUI.mqh>
+#include <RG_License.mqh>
 #include <GUI/RG_TradeVisualization.mqh>
 
 //====================================================
@@ -45,6 +46,44 @@ bool   g_RG_ChartStateCaptured=false;
 //====================================================
 
 bool g_RG_PendingPreview=false;
+
+string RG_MainPreviewGVPrefix()
+{
+   return("RiskGuard.MainPreview."+IntegerToString((int)ChartID())+"."+Symbol()+".");
+}
+
+void RG_SaveMainPreviewState()
+{
+   if(!RG_RuntimePreviewActive())
+      return;
+
+   string p=RG_MainPreviewGVPrefix();
+   GlobalVariableSet(p+"pending",g_RG_PendingPreview?1.0:0.0);
+   GlobalVariableSet(p+"bid",RG_TV_PendingBidSnapshot());
+   GlobalVariableSet(p+"ask",RG_TV_PendingAskSnapshot());
+}
+
+void RG_RestoreMainPreviewState()
+{
+   string p=RG_MainPreviewGVPrefix();
+   if(!GlobalVariableCheck(p+"pending"))
+      return;
+
+   g_RG_PendingPreview=(GlobalVariableGet(p+"pending")>0.5);
+
+   if(GlobalVariableCheck(p+"bid") && GlobalVariableCheck(p+"ask"))
+      RG_TV_SetPendingMarketSnapshot(GlobalVariableGet(p+"bid"),GlobalVariableGet(p+"ask"));
+
+   RG_TV_SetPendingPreview(g_RG_PendingPreview);
+}
+
+void RG_ClearMainPreviewState()
+{
+   string p=RG_MainPreviewGVPrefix();
+   GlobalVariableDel(p+"pending");
+   GlobalVariableDel(p+"bid");
+   GlobalVariableDel(p+"ask");
+}
 int  g_RG_PendingDirection=-1;
 
 //====================================================
@@ -708,8 +747,16 @@ int OnInit()
    RG_RuntimeClearPreview();
    RG_TV_DeleteTradeVisualization();
 
-   // Remove stale synthetic preview objects from older versions.
-   RG_TV_DeleteTradeVisualization();
+   // Restore a frozen Preview after a timeframe/chart reinitialization.
+   // The snapshot contains the exact Entry/SL/TP values from before the change.
+   bool rgPreviewRestored=RG_RuntimeRestorePreviewSnapshot();
+   RG_RestoreMainPreviewState();
+
+   if(rgPreviewRestored)
+   {
+      // Pending state is restored by the persistence block below if present.
+      // The visualization itself is redrawn after the panel is initialized.
+   }
 
    // MT4 owns real Entry / SL / TP visualization.
    RG_EnableNativeTradeLevels();
@@ -729,9 +776,24 @@ int OnInit()
    }
 
    RG_StatusReady();
+
+   // Simple private-license guard. The panel remains visible when locked,
+   // but all trading and position-management operations are disabled.
+   if(!RG_LicenseIsValid())
+   {
+      RG_RuntimeClearPreview();
+      RG_RuntimeClearPreviewSnapshot();
+      RG_ClearMainPreviewState();
+      RG_TV_DeleteTradeVisualization();
+   }
+
    RG_ProcessPositionManager();
    RG_UpdateGUI();
    RG_UpdateFooter();
+   RG_LicenseApplyStatus();
+
+   if(rgPreviewRestored && RG_LicenseIsValid())
+      RG_ProcessTradeVisualization();
 
    ChartRedraw();
 
@@ -744,6 +806,19 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
+   // Timeframe/symbol chart changes reinitialize the EA. Preserve the
+   // frozen Preview only for that lifecycle event.
+   if(reason==REASON_CHARTCHANGE && RG_RuntimePreviewActive())
+   {
+      RG_RuntimeSavePreviewSnapshot();
+      RG_SaveMainPreviewState();
+   }
+   else if(reason!=REASON_CHARTCHANGE)
+   {
+      RG_RuntimeClearPreviewSnapshot();
+      RG_ClearMainPreviewState();
+   }
+
    EventKillTimer();
    ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,false);
 
@@ -759,15 +834,22 @@ void OnDeinit(const int reason)
 
 void OnTimer()
 {
+   if(!RG_LicenseIsValid())
+   {
+      RG_UpdateGUI();
+      RG_UpdateFooter();
+      RG_LicenseApplyStatus();
+      return;
+   }
+
    RG_ProcessPositionManager();
 
    RG_UpdateGUI();
    RG_UpdateFooter();
+   RG_LicenseApplyStatus();
 
    // Only the selected frozen preview is drawn.
    RG_ProcessTradeVisualization();
-
-   ChartRedraw();
 }
 
 //====================================================
@@ -777,6 +859,14 @@ void OnTimer()
 void OnTick()
 {
    RefreshRates();
+
+   if(!RG_LicenseIsValid())
+   {
+      RG_UpdateGUI();
+      RG_UpdateFooter();
+      RG_LicenseApplyStatus();
+      return;
+   }
 
    RG_ProcessPositionManager();
 
@@ -788,11 +878,10 @@ void OnTick()
 
    RG_UpdateGUI();
    RG_UpdateFooter();
+   RG_LicenseApplyStatus();
 
    // Preview values are not recalculated from Ask/Bid.
    RG_ProcessTradeVisualization();
-
-   ChartRedraw();
 }
 
 //====================================================
@@ -805,6 +894,13 @@ void OnChartEvent(
    const double &dparam,
    const string &sparam)
 {
+   // Locked builds keep the panel visible but ignore all chart controls.
+   if(!RG_LicenseIsValid())
+   {
+      RG_LicenseApplyStatus();
+      return;
+   }
+
    //=================================================
    // HELD RISK +/- BUTTON
    //=================================================
@@ -1050,6 +1146,8 @@ void OnChartEvent(
       {
          RG_ClearPendingMode();
          RG_RuntimeClearPreview();
+         RG_RuntimeClearPreviewSnapshot();
+         RG_ClearMainPreviewState();
          RG_TV_DeleteTradeVisualization();
 
          RG_SetEditText(
@@ -1150,6 +1248,8 @@ void OnChartEvent(
             if(ticket>0)
             {
                RG_RuntimeClearPreview();
+               RG_RuntimeClearPreviewSnapshot();
+               RG_ClearMainPreviewState();
                RG_TV_DeleteTradeVisualization();
                RG_ClearPendingMode();
 
@@ -1183,6 +1283,8 @@ void OnChartEvent(
             if(ticket>0)
             {
                RG_RuntimeClearPreview();
+               RG_RuntimeClearPreviewSnapshot();
+               RG_ClearMainPreviewState();
                RG_TV_DeleteTradeVisualization();
                RG_EnableNativeTradeLevels();
                RG_ClearPendingMode();
