@@ -123,6 +123,53 @@ void RG_RuntimeClearPreviewSnapshot()
 // Init
 //====================================================
 
+// Called from OnInit so changing EA Inputs and pressing OK
+// immediately reloads the input values without requiring a
+// complete terminal restart.
+void RG_RuntimeResetForInputs()
+{
+   g_RG_RuntimeReady=false;
+   g_RG_SettingsApplied=false;
+
+   // Explicitly invalidate the cached FixedLot whenever MT4 reinitializes
+   // the EA from the Inputs dialog. This prevents an older runtime value
+   // from surviving a parameter change.
+   g_RG_FixedLot=FixedLot;
+   g_RG_RiskMode=DefaultRiskMode;
+   g_RG_RiskValue=(RiskValue>0.0 ? RiskValue : FixedLot);
+}
+
+// Keep the runtime FixedLot synchronized with the current EA input while
+// there is no active frozen preview. This is intentionally not done during
+// a preview so Entry/SL/TP and its associated lot remain frozen.
+void RG_RuntimeSyncInputDefaults()
+{
+   if(g_RG_PreviewActive)
+      return;
+
+   if(!g_RG_RuntimeReady)
+   {
+      RG_RuntimeInit();
+      return;
+   }
+
+   if(LotMode==LOT_FIXED)
+   {
+      if(MathAbs(g_RG_FixedLot-FixedLot)>0.0000001)
+         g_RG_FixedLot=FixedLot;
+
+      if(g_RG_RiskMode==RG_RISK_LOT &&
+         MathAbs(g_RG_RiskValue-FixedLot)>0.0000001)
+      {
+         g_RG_RiskValue=FixedLot;
+      }
+   }
+}
+
+//====================================================
+// Init
+//====================================================
+
 void RG_RuntimeInit()
 {
    // IMPORTANT:
