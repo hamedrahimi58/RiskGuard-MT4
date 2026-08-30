@@ -45,7 +45,6 @@
 #define RG_GUI_CANCEL          RG_PREFIX+"CANCEL"
 #define RG_GUI_CLOSE           RG_PREFIX+"CLOSE_ALL"
 #define RG_GUI_TRAILING        RG_PREFIX+"TRAILING"
-#define RG_GUI_AUTO_RF         RG_PREFIX+"AUTO_RF"
 
 #define RG_GUI_RISK_INFO       RG_PREFIX+"RISK_INFO"
 #define RG_GUI_ALLOWED_LOT_BG  RG_PREFIX+"ALLOWED_LOT_BG"
@@ -66,8 +65,6 @@
 
 #define RG_GUI_FOOTER          RG_PREFIX+"FOOTER"
 #define RG_GUI_FOOTER_TEXT     RG_PREFIX+"FOOTER_TEXT"
-#define RG_GUI_BALANCE_TEXT    RG_PREFIX+"BALANCE_TEXT"
-#define RG_GUI_PL_TEXT         RG_PREFIX+"PL_TEXT"
 #define RG_GUI_MARKET_BG       RG_PREFIX+"MARKET_BG"
 #define RG_GUI_MARKET_MAXLOT   RG_PREFIX+"MARKET_MAXLOT"
 #define RG_GUI_MARKET_ACTIVE   RG_PREFIX+"MARKET_ACTIVE"
@@ -84,7 +81,6 @@
 #define RG_GUI_POS_THIRD       "THIRD_"
 #define RG_GUI_POS_HALF        "HALF_"
 #define RG_GUI_POS_CLOSE       "X_"
-#define RG_GUI_POS_TRAILING    "TR_"
 #define RG_GUI_POS_PL          "PL_"
 #define RG_GUI_POS_PL_DOLLAR   "PL_D_"
 #define RG_GUI_POS_PL_PERCENT  "PL_P_"
@@ -92,7 +88,6 @@
 #define RG_GUI_BG              C'25,25,25'
 #define RG_GUI_HEADER_BG       C'18,18,18'
 #define RG_GUI_FOOTER_BG       C'18,18,18'
-#define RG_GUI_REFERENCE_PANEL_W 425
 #define RG_GUI_ROW_BG          C'31,31,31'
 #define RG_GUI_ROW_ALT_BG      C'36,36,36'
 
@@ -121,32 +116,30 @@ double g_RG_GUI_DisplayScale=1.0;
 int RG_GUI_S(int base);
 int RG_GUI_FS(int base);
 
-#define RG_GUI_TITLE_SIZE      RG_GUI_FS(16)
-#define RG_GUI_BALANCE_SIZE    RG_GUI_FS(15)
-#define RG_GUI_MARKET_TEXT_SIZE RG_GUI_FS(12)
-#define RG_GUI_TEXT_SIZE       RG_GUI_FS(11)
+#define RG_GUI_TITLE_SIZE      RG_GUI_FS(18)
+#define RG_GUI_TEXT_SIZE       RG_GUI_FS(12)
 #define RG_GUI_POSITION_TEXT_SIZE RG_GUI_FS(10)
 #define RG_GUI_STATUS_SIZE     RG_GUI_FS(11)
 #define RG_GUI_STATUS_ROW_H    RG_GUI_S(34)
-#define RG_GUI_BUTTON_SIZE     RG_GUI_FS(10)
+#define RG_GUI_BUTTON_SIZE     RG_GUI_FS(11)
 
 #define RG_GUI_PAD             RG_GUI_S(16)
-#define RG_GUI_HEADER_H        RG_GUI_S(50)
+#define RG_GUI_HEADER_H        RG_GUI_S(57)
 
 #define RG_GUI_INPUT_W         RG_GUI_S(270)
 #define RG_GUI_INPUT_H         RG_GUI_S(42)
 
 #define RG_GUI_BUTTON_W        RG_GUI_S(169)
-#define RG_GUI_BUTTON_H        RG_GUI_S(39)
+#define RG_GUI_BUTTON_H        RG_GUI_S(43)
 #define RG_GUI_SMALL_BUTTON_W  RG_GUI_S(149)
-#define RG_GUI_SMALL_BUTTON_H  RG_GUI_S(40)
+#define RG_GUI_SMALL_BUTTON_H  RG_GUI_S(43)
 
-#define RG_GUI_ROW_H           RG_GUI_S(105)
-#define RG_GUI_SECTION_H       RG_GUI_S(38)
-#define RG_GUI_FOOTER_H        RG_GUI_S(46)
-#define RG_GUI_MARKET_H        RG_GUI_S(128)
+#define RG_GUI_ROW_H           RG_GUI_S(110)
+#define RG_GUI_SECTION_H       RG_GUI_S(42)
+#define RG_GUI_FOOTER_H        RG_GUI_S(54)
+#define RG_GUI_MARKET_H        RG_GUI_S(126)
 
-#define RG_GUI_RISK_H          RG_GUI_S(71)
+#define RG_GUI_RISK_H          RG_GUI_S(74)
 #define RG_GUI_RISK_Y          0
 #define RG_GUI_POSITION_TOP    0
 #define RG_GUI_ROWS_START      0
@@ -245,11 +238,6 @@ string RG_GUI_PosHalf(int ticket)
 string RG_GUI_PosClose(int ticket)
 {
    return(RG_GUI_PosName(RG_GUI_POS_CLOSE,ticket));
-}
-
-string RG_GUI_PosTrailing(int ticket)
-{
-   return(RG_GUI_PosName(RG_GUI_POS_TRAILING,ticket));
 }
 
 string RG_GUI_PosPL(int ticket)
@@ -436,11 +424,9 @@ void RG_GUI_CalculateLayout(
       RG_GUI_RISK_H+
       RG_GUI_S(8);
 
-   // Allowed Lot card is RG_GUI_S(54) high.  Start BUY/SELL
-   // below the full card so the buttons cannot overlap it.
    L.primaryY=
       L.previewLotY+
-      RG_GUI_S(54)+
+      RG_GUI_S(46)+
       RG_GUI_S(10);
 
    L.pendingY=
@@ -462,7 +448,7 @@ void RG_GUI_CalculateLayout(
    L.positionY=
       L.utilityY+
       RG_GUI_BUTTON_H+
-      RG_GUI_S(10);
+      10;
 
    L.rowsY=
       L.positionY+
@@ -1000,25 +986,23 @@ int RG_GUI_GetPanelWidth()
 
    g_RG_GUI_DisplayScale=((double)dpi)/96.0;
 
-   // Reference geometry: 2048px chart -> 370px panel.
+   // Reference geometry: 2048px chart -> PanelWidth (normally 640px).
    // The panel follows the chart proportion instead of being fixed to 640px.
+   // A small usability floor prevents controls/text from becoming unusable.
    double scale=((double)chartWidth)/2048.0;
 
-   if(scale<0.75)
-      scale=0.75;
+   if(scale<0.78)
+      scale=0.78;
 
    if(scale>1.75)
       scale=1.75;
 
    g_RG_GUI_UIScale=scale;
 
-   int w=(int)MathRound(((double)RG_GUI_REFERENCE_PANEL_W)*scale);
+   int w=(int)MathRound(((double)PanelWidth)*scale);
 
-   // Keep a functional minimum width for the fixed Trade-tab controls.
-   // The panel remains proportional on normal/larger charts, but the
-   // minimum prevents the Risk row from overflowing its own panel.
-   if(w<360)
-      w=360;
+   if(w<500)
+      w=500;
 
    return(w);
 }
@@ -1038,18 +1022,7 @@ int RG_GUI_S(int base)
 
 int RG_GUI_FS(int base)
 {
-   double uiScale=g_RG_GUI_UIScale;
-   if(uiScale<=0.0)
-      uiScale=1.0;
-
-   double dpiScale=g_RG_GUI_DisplayScale;
-   if(dpiScale<=0.0)
-      dpiScale=1.0;
-
-   // Geometry follows chart width. Font size is additionally normalized
-   // against Windows/terminal DPI so the visual size remains consistent
-   // across 100%, 125% and 150% display scaling.
-   int v=(int)MathRound(((double)base)*uiScale/dpiScale);
+   int v=RG_GUI_S(base);
    if(v<8)
       v=8;
    return(v);
@@ -1130,8 +1103,11 @@ void RG_GUI_ReserveChartSpace(int width)
 bool RG_GUI_IsManagedOrder()
 {
    return(
-      OrderType()==OP_BUY ||
-      OrderType()==OP_SELL
+      OrderMagicNumber()==MagicNumber &&
+      (
+         OrderType()==OP_BUY ||
+         OrderType()==OP_SELL
+      )
    );
 }
 
@@ -1154,6 +1130,9 @@ int RG_GUI_ActivePositionCount()
       {
          continue;
       }
+
+      if(RG_IsRiskFreeDone(OrderTicket()))
+         continue;
 
       count++;
    }
@@ -1397,8 +1376,8 @@ void RG_GUI_DrawPositionRow(
    int gap=RG_GUI_S(5);
 
    int total=
-      (buttonW*6)+
-      (gap*5);
+      (buttonW*5)+
+      (gap*4);
 
    int bx=
       x+
@@ -1415,7 +1394,7 @@ void RG_GUI_DrawPositionRow(
       buttonW,
       buttonH,
       RG_GUI_BLUE,
-      clrBlack,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
 
@@ -1428,7 +1407,7 @@ void RG_GUI_DrawPositionRow(
       buttonW,
       buttonH,
       RG_GUI_CYAN,
-      clrBlack,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
 
@@ -1441,7 +1420,7 @@ void RG_GUI_DrawPositionRow(
       buttonW,
       buttonH,
       RG_GUI_YELLOW,
-      clrBlack,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
 
@@ -1454,20 +1433,7 @@ void RG_GUI_DrawPositionRow(
       buttonW,
       buttonH,
       RG_GUI_ORANGE,
-      clrBlack,
-      RG_GUI_Z_BUTTON
-   );
-
-   RG_GUI_CreateButton(
-      RG_GUI_PosTrailing(ticket),
-      "TR",
-      bx+
-      ((buttonW+gap)*4),
-      by,
-      buttonW,
-      buttonH,
-      RG_GUI_YELLOW,
-      clrBlack,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
 
@@ -1475,12 +1441,12 @@ void RG_GUI_DrawPositionRow(
       RG_GUI_PosClose(ticket),
       "X",
       bx+
-      ((buttonW+gap)*5),
+      ((buttonW+gap)*4),
       by,
       buttonW,
       buttonH,
       RG_GUI_RED,
-      clrBlack,
+      RG_GUI_TEXT,
       RG_GUI_Z_BUTTON
    );
 }
@@ -1614,32 +1580,6 @@ void RG_GUI_UpdatePositionRowValues(
    {
       ObjectSetInteger(0,RG_GUI_PosRF(ticket),OBJPROP_BGCOLOR,RG_GUI_CYAN);
       ObjectSetString(0,RG_GUI_PosRF(ticket),OBJPROP_TEXT,"RF");
-   }
-
-   if(ObjectFind(0,RG_GUI_PosTrailing(ticket))>=0)
-   {
-      bool trailingOn=RG_TrailingIsEnabled(ticket);
-
-      ObjectSetInteger(
-         0,
-         RG_GUI_PosTrailing(ticket),
-         OBJPROP_BGCOLOR,
-         (trailingOn ? RG_GUI_GREEN : RG_GUI_YELLOW)
-      );
-
-      ObjectSetInteger(
-         0,
-         RG_GUI_PosTrailing(ticket),
-         OBJPROP_COLOR,
-         clrBlack
-      );
-
-      ObjectSetString(
-         0,
-         RG_GUI_PosTrailing(ticket),
-         OBJPROP_TEXT,
-         (trailingOn ? "TR ON" : "TR")
-      );
    }
 }
 
@@ -2766,7 +2706,7 @@ void RG_GUI_UpdatePositionSectionLayout()
          0,
          RG_GUI_PROFIT,
          OBJPROP_YDISTANCE,
-         L.marketY+RG_GUI_S(78)
+         L.marketY+RG_GUI_S(8)
       );
 
       ObjectSetInteger(
@@ -2785,7 +2725,7 @@ void RG_GUI_UpdatePositionSectionLayout()
          0,
          RG_GUI_MARKET_MAXLOT,
          OBJPROP_YDISTANCE,
-         L.marketY+RG_GUI_S(43)
+         L.marketY+RG_GUI_S(48)
       );
 
       ObjectSetInteger(
@@ -2804,7 +2744,7 @@ void RG_GUI_UpdatePositionSectionLayout()
          0,
          RG_GUI_MARKET_ACTIVE,
          OBJPROP_YDISTANCE,
-         L.marketY+RG_GUI_S(43)
+         L.marketY+RG_GUI_S(48)
       );
 
       ObjectSetInteger(
@@ -2823,7 +2763,7 @@ void RG_GUI_UpdatePositionSectionLayout()
          0,
          RG_GUI_MARKET_SERVER,
          OBJPROP_YDISTANCE,
-         L.marketY+RG_GUI_S(78)
+         L.marketY+RG_GUI_S(8)
       );
 
       ObjectSetInteger(
@@ -2846,21 +2786,30 @@ void RG_GUI_UpdatePositionSectionLayout()
       );
    }
 
-   if(ObjectFind(0,RG_GUI_FOOTER_TEXT)>=0)
-      ObjectSetInteger(0,RG_GUI_FOOTER_TEXT,OBJPROP_XDISTANCE,x+(w/2));
-
-   if(ObjectFind(0,RG_GUI_BALANCE_TEXT)>=0)
+   if(ObjectFind(
+      0,
+      RG_GUI_FOOTER_TEXT)>=0)
    {
-      ObjectSetInteger(0,RG_GUI_BALANCE_TEXT,OBJPROP_XDISTANCE,x+(w/4));
-      ObjectSetInteger(0,RG_GUI_BALANCE_TEXT,OBJPROP_YDISTANCE,L.footerY+RG_GUI_S(27));
-      ObjectSetInteger(0,RG_GUI_BALANCE_TEXT,OBJPROP_ANCHOR,ANCHOR_CENTER);
-   }
+      ObjectSetInteger(
+         0,
+         RG_GUI_FOOTER_TEXT,
+         OBJPROP_XDISTANCE,
+         x+(w/2)
+      );
 
-   if(ObjectFind(0,RG_GUI_PL_TEXT)>=0)
-   {
-      ObjectSetInteger(0,RG_GUI_PL_TEXT,OBJPROP_XDISTANCE,x+((w*3)/4));
-      ObjectSetInteger(0,RG_GUI_PL_TEXT,OBJPROP_YDISTANCE,L.footerY+RG_GUI_S(27));
-      ObjectSetInteger(0,RG_GUI_PL_TEXT,OBJPROP_ANCHOR,ANCHOR_CENTER);
+      ObjectSetInteger(
+         0,
+         RG_GUI_FOOTER_TEXT,
+         OBJPROP_YDISTANCE,
+         L.footerY+RG_GUI_S(27)
+      );
+
+      ObjectSetInteger(
+         0,
+         RG_GUI_FOOTER_TEXT,
+         OBJPROP_ANCHOR,
+         ANCHOR_CENTER
+      );
    }
 
    if(ObjectFind(
@@ -2952,37 +2901,6 @@ void RG_GUI_TogglePositionPL()
    RG_UpdateFooter();
 }
 
-void RG_GUI_ToggleAutoRiskFree()
-{
-   RG_SetAutoRiskFreeEnabled(!RG_AutoRiskFreeEnabled());
-
-   if(ObjectFind(0,RG_GUI_AUTO_RF)>=0)
-   {
-      bool autoRF=RG_AutoRiskFreeEnabled();
-
-      ObjectSetInteger(
-         0,
-         RG_GUI_AUTO_RF,
-         OBJPROP_BGCOLOR,
-         (autoRF ? RG_GUI_GREEN : RG_GUI_HEADER_BG)
-      );
-
-      ObjectSetInteger(
-         0,
-         RG_GUI_AUTO_RF,
-         OBJPROP_COLOR,
-         (autoRF ? clrBlack : RG_GUI_TEXT)
-      );
-
-      ObjectSetString(
-         0,
-         RG_GUI_AUTO_RF,
-         OBJPROP_TEXT,
-         (autoRF ? "AUTO RF: ON" : "AUTO RF: OFF")
-      );
-   }
-}
-
 void RG_GUI_TogglePanel()
 {
    g_RG_GUI_PanelExpanded=
@@ -3063,9 +2981,6 @@ bool RG_CreatePanel()
          RG_GUI_Z_BUTTON
       );
 
-      ObjectSetInteger(0,RG_GUI_PANEL_TOGGLE,OBJPROP_FONTSIZE,RG_GUI_TITLE_SIZE);
-      ObjectSetText(RG_GUI_PANEL_TOGGLE,"RiskGuard MT4   [ + ]",RG_GUI_TITLE_SIZE,RG_GUI_FONT,RG_GUI_TEXT);
-
       g_RG_GUI_LastChartWidth=
          (int)ChartGetInteger(
             0,
@@ -3138,69 +3053,28 @@ bool RG_CreatePanel()
       RG_GUI_Z_BUTTON
    );
 
-   ObjectSetInteger(0,RG_GUI_PANEL_TOGGLE,OBJPROP_FONTSIZE,RG_GUI_TITLE_SIZE);
-   ObjectSetText(RG_GUI_PANEL_TOGGLE,"RiskGuard MT4   [ - ]",RG_GUI_TITLE_SIZE,RG_GUI_FONT,RG_GUI_TEXT);
-
    //=================================================
    // RISK ROW
    //=================================================
 
    int riskY=L.riskY;
    int riskX=x+RG_GUI_PAD;
-
-   // The Risk row must always fit INSIDE the panel.  Its six controls
-   // previously used independently scaled fixed widths, which could
-   // exceed the available content width on smaller charts.
-   int riskAvail=w-(2*RG_GUI_PAD);
-   if(riskAvail<220)
-      riskAvail=220;
-
    int riskGap=RG_GUI_S(7);
    int riskLabelW=RG_GUI_S(60);
    int riskMinusW=RG_GUI_S(46);
    int riskValueW=RG_GUI_S(64);
    int riskPlusW=RG_GUI_S(46);
    int riskModeW=RG_GUI_S(56);
-
-   int riskBase=
-      riskLabelW+
-      riskValueW+
-      riskMinusW+
-      riskPlusW+
-      (riskModeW*3)+
-      (riskGap*6);
-
-   if(riskBase>riskAvail)
-   {
-      double f=((double)riskAvail)/((double)riskBase);
-      if(f<0.65)
-         f=0.65;
-
-      riskLabelW=(int)MathRound(riskLabelW*f);
-      riskMinusW=(int)MathRound(riskMinusW*f);
-      riskValueW=(int)MathRound(riskValueW*f);
-      riskPlusW=(int)MathRound(riskPlusW*f);
-      riskModeW=(int)MathRound(riskModeW*f);
-      riskGap=(int)MathRound(riskGap*f);
-   }
-
    int riskRowH=RG_GUI_RISK_H;
 
    RG_GUI_CreateText(
       RG_PREFIX+"RISK_LABEL",
       "Risk",
       riskX,
-      riskY+(riskRowH/2),
+      riskY+RG_GUI_S(13),
       RG_GUI_TEXT,
       RG_GUI_TEXT_SIZE,
       RG_GUI_Z_TEXT
-   );
-
-   ObjectSetInteger(
-      0,
-      RG_PREFIX+"RISK_LABEL",
-      OBJPROP_ANCHOR,
-      ANCHOR_LEFT
    );
 
    int rx=
@@ -3227,18 +3101,11 @@ bool RG_CreatePanel()
    RG_GUI_CreateText(
       RG_GUI_RISK_VALUE,
       "",
-      rx+(riskValueW/2),
-      riskY+(riskRowH/2),
+      rx,
+      riskY+RG_GUI_S(13),
       RG_GUI_TEXT,
       RG_GUI_TEXT_SIZE,
       RG_GUI_Z_TEXT
-   );
-
-   ObjectSetInteger(
-      0,
-      RG_GUI_RISK_VALUE,
-      OBJPROP_ANCHOR,
-      ANCHOR_CENTER
    );
 
    rx+=
@@ -3314,7 +3181,7 @@ bool RG_CreatePanel()
       x+RG_GUI_PAD,
       L.previewLotY,
       w-(2*RG_GUI_PAD),
-      RG_GUI_S(54),
+      54,
       RG_GUI_HEADER_BG,
       RG_GUI_BORDER,
       RG_GUI_Z_PANEL+1
@@ -3433,15 +3300,15 @@ bool RG_CreatePanel()
    );
 
    RG_GUI_CreateButton(
-      RG_GUI_AUTO_RF,
-      (RG_AutoRiskFreeEnabled() ? "AUTO RF: ON" : "AUTO RF: OFF"),
+      RG_GUI_TRAILING,
+      "TRAILING",
       L.actionX+
       L.actionW+
       L.actionGap,
       L.utilityY,
       L.actionW,
       RG_GUI_BUTTON_H,
-      (RG_AutoRiskFreeEnabled() ? RG_GUI_GREEN : RG_GUI_HEADER_BG),
+      RG_GUI_YELLOW,
       clrBlack,
       RG_GUI_Z_BUTTON
    );
@@ -3504,7 +3371,7 @@ bool RG_CreatePanel()
       x+RG_GUI_PAD+RG_GUI_S(14),
       L.marketY+RG_GUI_S(8),
       RG_GUI_MUTED,
-      RG_GUI_MARKET_TEXT_SIZE,
+      RG_GUI_TEXT_SIZE,
       RG_GUI_Z_TEXT
    );
 
@@ -3514,7 +3381,7 @@ bool RG_CreatePanel()
       x+RG_GUI_PAD+((w-(2*RG_GUI_PAD))/2),
       L.marketY+RG_GUI_S(8),
       RG_GUI_MUTED,
-      RG_GUI_MARKET_TEXT_SIZE,
+      RG_GUI_TEXT_SIZE,
       RG_GUI_Z_TEXT
    );
 
@@ -3522,9 +3389,9 @@ bool RG_CreatePanel()
       RG_GUI_MARKET_ACTIVE,
       "",
       x+RG_GUI_PAD+RG_GUI_S(14),
-      L.marketY+RG_GUI_S(43),
+      L.marketY+RG_GUI_S(48),
       RG_GUI_MUTED,
-      RG_GUI_MARKET_TEXT_SIZE,
+      RG_GUI_TEXT_SIZE,
       RG_GUI_Z_TEXT
    );
 
@@ -3532,9 +3399,9 @@ bool RG_CreatePanel()
       RG_GUI_MARKET_MAXLOT,
       "",
       x+RG_GUI_PAD+((w-(2*RG_GUI_PAD))/2),
-      L.marketY+RG_GUI_S(43),
+      L.marketY+RG_GUI_S(48),
       RG_GUI_MUTED,
-      RG_GUI_MARKET_TEXT_SIZE,
+      RG_GUI_TEXT_SIZE,
       RG_GUI_Z_TEXT
    );
 
@@ -3542,9 +3409,9 @@ bool RG_CreatePanel()
       RG_GUI_PROFIT,
       "",
       x+RG_GUI_PAD+RG_GUI_S(14),
-      L.marketY+RG_GUI_S(78),
+      L.marketY+RG_GUI_S(8),
       RG_GUI_GREEN,
-      RG_GUI_MARKET_TEXT_SIZE,
+      RG_GUI_TEXT_SIZE,
       RG_GUI_Z_TEXT
    );
 
@@ -3552,9 +3419,9 @@ bool RG_CreatePanel()
       RG_GUI_MARKET_SERVER,
       "",
       x+RG_GUI_PAD+((w-(2*RG_GUI_PAD))/2),
-      L.marketY+RG_GUI_S(78),
+      L.marketY+RG_GUI_S(8),
       RG_GUI_YELLOW,
-      RG_GUI_MARKET_TEXT_SIZE,
+      RG_GUI_TEXT_SIZE,
       RG_GUI_Z_TEXT
    );
 
@@ -3574,28 +3441,21 @@ bool RG_CreatePanel()
    );
 
    RG_GUI_CreateText(
-      RG_GUI_BALANCE_TEXT,
+      RG_GUI_FOOTER_TEXT,
       "",
-      x+(w/4),
+      x+(w/2),
       L.footerY+RG_GUI_S(27),
       RG_GUI_MUTED,
-      RG_GUI_BALANCE_SIZE,
+      RG_GUI_TEXT_SIZE,
       RG_GUI_Z_TEXT
    );
 
-   ObjectSetInteger(0,RG_GUI_BALANCE_TEXT,OBJPROP_ANCHOR,ANCHOR_CENTER);
-
-   RG_GUI_CreateText(
-      RG_GUI_PL_TEXT,
-      "",
-      x+((w*3)/4),
-      L.footerY+RG_GUI_S(27),
-      RG_GUI_MUTED,
-      RG_GUI_BALANCE_SIZE,
-      RG_GUI_Z_TEXT
+   ObjectSetInteger(
+      0,
+      RG_GUI_FOOTER_TEXT,
+      OBJPROP_ANCHOR,
+      ANCHOR_CENTER
    );
-
-   ObjectSetInteger(0,RG_GUI_PL_TEXT,OBJPROP_ANCHOR,ANCHOR_CENTER);
 
    g_RG_GUI_LastChartWidth=
       (int)ChartGetInteger(
@@ -3613,43 +3473,6 @@ bool RG_CreatePanel()
    ChartRedraw();
 
    return(true);
-}
-
-//====================================================
-// Closed-account P/L
-//====================================================
-
-double RG_GUI_ClosedPL()
-{
-   datetime now=TimeCurrent();
-   datetime start=0;
-
-   if(PanelPLPeriod==RG_PL_TODAY)
-      start=StrToTime(TimeToString(now,TIME_DATE));
-   else if(PanelPLPeriod==RG_PL_WEEK)
-   {
-      datetime dayStart=StrToTime(TimeToString(now,TIME_DATE));
-      int dow=TimeDayOfWeek(dayStart);
-      start=dayStart-(((dow+6)%7)*86400);
-   }
-   else if(PanelPLPeriod==RG_PL_MONTH)
-   {
-      string ds=TimeToString(now,TIME_DATE);
-      start=StrToTime(StringSubstr(ds,0,8)+"01");
-   }
-
-   double total=0.0;
-   for(int i=OrdersHistoryTotal()-1;i>=0;i--)
-   {
-      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
-         continue;
-      if(OrderType()!=OP_BUY && OrderType()!=OP_SELL)
-         continue;
-      if(PanelPLPeriod!=RG_PL_ALL && OrderCloseTime()<start)
-         continue;
-      total+=OrderProfit()+OrderSwap()+OrderCommission();
-   }
-   return(total);
 }
 
 //====================================================
@@ -3705,30 +3528,18 @@ void RG_UpdateFooter()
       );
    }
 
-   double closedPL=RG_GUI_ClosedPL();
-   string periodName=
-      (PanelPLPeriod==RG_PL_TODAY ? "Today" :
-       PanelPLPeriod==RG_PL_WEEK ? "Week" :
-       PanelPLPeriod==RG_PL_MONTH ? "Month" : "All");
-
-   if(ObjectFind(0,RG_GUI_BALANCE_TEXT)>=0)
+   if(ObjectFind(
+      0,
+      RG_GUI_FOOTER_TEXT)>=0)
    {
       RG_GUI_SetText(
-         RG_GUI_BALANCE_TEXT,
-         "Balance : "+DoubleToString(AccountBalance(),2),
+         RG_GUI_FOOTER_TEXT,
+         "Balance : "+
+         DoubleToString(
+            AccountBalance(),
+            2
+         ),
          RG_GUI_MUTED
-      );
-   }
-
-   if(ObjectFind(0,RG_GUI_PL_TEXT)>=0)
-   {
-      RG_GUI_SetText(
-         RG_GUI_PL_TEXT,
-         periodName+" P/L : "+
-         (closedPL>=0.0 ? "+$" : "-$")+
-         DoubleToString(MathAbs(closedPL),2),
-         (closedPL>0.0 ? RG_GUI_GREEN :
-          closedPL<0.0 ? RG_GUI_RED : RG_GUI_MUTED)
       );
    }
 
@@ -3757,34 +3568,7 @@ void RG_UpdateFooter()
 
 void RG_UpdateGUI()
 {
-   RG_RuntimeSyncInputDefaults();
    RefreshRates();
-
-   if(ObjectFind(0,RG_GUI_AUTO_RF)>=0)
-   {
-      bool autoRF=RG_AutoRiskFreeEnabled();
-
-      ObjectSetInteger(
-         0,
-         RG_GUI_AUTO_RF,
-         OBJPROP_BGCOLOR,
-         (autoRF ? RG_GUI_GREEN : RG_GUI_HEADER_BG)
-      );
-
-      ObjectSetInteger(
-         0,
-         RG_GUI_AUTO_RF,
-         OBJPROP_COLOR,
-         (autoRF ? clrBlack : RG_GUI_TEXT)
-      );
-
-      ObjectSetString(
-         0,
-         RG_GUI_AUTO_RF,
-         OBJPROP_TEXT,
-         (autoRF ? "AUTO RF: ON" : "AUTO RF: OFF")
-      );
-   }
 
    int chartWidth=
       (int)ChartGetInteger(

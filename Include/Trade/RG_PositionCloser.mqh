@@ -258,12 +258,6 @@ bool RG_CloseAll()
       if(!OrderSelect(i,SELECT_BY_POS,MODE_TRADES))
          continue;
 
-      if(OrderSymbol()!=Symbol())
-         continue;
-
-      if(OrderMagicNumber()!=MagicNumber)
-         continue;
-
       if(OrderType()!=OP_BUY &&
          OrderType()!=OP_SELL)
          continue;

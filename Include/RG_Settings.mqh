@@ -40,7 +40,8 @@ input ENUM_RG_LOT_MODE LotMode = LOT_FIXED;
 
 input double FixedLot = 0.01;
 
-input double MaxLot = 100.0;
+// Maximum trade volume allowed by RiskGuard.
+input double MaxLot = 5.0;
 
 //====================================================
 // RISK ENGINE / PREVIEW
@@ -91,15 +92,20 @@ input int TakeProfit = 200;
 input string RG_SECTION_RISKFREE =
    "========== RISK FREE ==========";
 
-input bool UseRiskFree = true;
+// Manual RF is always available from the position row.
+// Auto RF is controlled only by the panel ON/OFF button.
+input int RiskFreeTriggerPips = 400;
 
-input bool AutoRiskFree = true;
+// Display period for closed-account P/L shown on the panel.
+enum ENUM_RG_PL_PERIOD
+{
+   RG_PL_TODAY = 0,
+   RG_PL_WEEK  = 1,
+   RG_PL_MONTH = 2,
+   RG_PL_ALL   = 3
+};
 
-input int RiskFreeTrigger = 100;
-
-input int RiskFreeOffset = 0;
-
-input int RiskFreeExtraPoints = 0;
+input ENUM_RG_PL_PERIOD PanelPLPeriod = RG_PL_TODAY;
 
 
 //====================================================
@@ -109,17 +115,19 @@ input int RiskFreeExtraPoints = 0;
 input string RG_SECTION_TRAILING =
    "========== TRAILING ==========";
 
-input bool UseTrailing = false;
+// Trailing is controlled per-position from the TR button.
+// Trailing starts only after Risk Free and an additional profit move.
+enum ENUM_RG_TRAILING_METHOD
+{
+   RG_TRAILING_DISTANCE = 0,
+   RG_TRAILING_CANDLE   = 1,
+   RG_TRAILING_MOVING   = 2,
+   RG_TRAILING_FRACTAL  = 3
+};
 
-input bool AutoTrailing = false;
-
-input int StartTrailingAfter = 150;
-
-input int TrailingStart = 150;
-
-input int TrailingStop = 100;
-
-input int TrailingStep = 10;
+input ENUM_RG_TRAILING_METHOD TrailingMethod = RG_TRAILING_DISTANCE;
+input double TrailingStartAfterRFPips = 50.0;
+input double TrailingDistancePips = 100.0;
 
 
 //====================================================

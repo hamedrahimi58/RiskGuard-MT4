@@ -467,9 +467,6 @@ bool RG_PanelBreakEvenTicket(int ticket)
 
    // Stage 3: positions are NOT restricted to the chart symbol.
    // Ticket is the identity; OrderSymbol() supplies the position symbol.
-   if(OrderMagicNumber()!=MagicNumber)
-      return(false);
-
    int orderType=OrderType();
 
    if(orderType!=OP_BUY &&
@@ -563,9 +560,6 @@ bool RG_PanelRiskFreeTicket(int ticket)
 
    // Stage 3: positions are NOT restricted to the chart symbol.
    // Ticket is the identity; all market data comes from OrderSymbol().
-   if(OrderMagicNumber()!=MagicNumber)
-      return(false);
-
    int type=OrderType();
 
    if(type!=OP_BUY && type!=OP_SELL)
@@ -743,7 +737,12 @@ int OnInit()
 {
    RG_CaptureChartState();
 
+   // Force a fresh read of current EA Inputs on every MT4 reinitialization.
+   RG_RuntimeResetForInputs();
    RG_RuntimeInit();
+
+   // Auto Risk Free is a panel-controlled feature and starts OFF.
+   RG_SetAutoRiskFreeEnabled(false);
    RG_RuntimeClearPreview();
    RG_TV_DeleteTradeVisualization();
 
@@ -842,6 +841,7 @@ void OnTimer()
       return;
    }
 
+   RG_RuntimeSyncInputDefaults();
    RG_ProcessPositionManager();
 
    RG_UpdateGUI();
@@ -868,13 +868,15 @@ void OnTick()
       return;
    }
 
+   RG_RuntimeSyncInputDefaults();
    RG_ProcessPositionManager();
 
-   if(UseRiskFree)
-      RG_ProcessRiskFree();
+   // Manual RF is controlled by the position-row RF button.
+   // Automatic RF is controlled by the panel AUTO RF toggle.
+   RG_ProcessRiskFree();
 
-   if(UseTrailing)
-      RG_ProcessTrailing();
+   // Trailing is controlled independently per position by its TR button.
+   RG_ProcessTrailing();
 
    RG_UpdateGUI();
    RG_UpdateFooter();
@@ -1453,6 +1455,37 @@ void OnChartEvent(
          return;
       }
 
+      // Per-position trailing toggle
+      if(RG_GUI_IsPositionObject(
+         sparam,RG_GUI_POS_TRAILING))
+      {
+         int ticket=
+            RG_GUI_TicketFromPositionObject(
+               sparam,RG_GUI_POS_TRAILING
+            );
+
+         if(ticket>0)
+         {
+            RG_ToggleTrailing(ticket);
+
+            if(RG_TrailingIsEnabled(ticket))
+            {
+               // TR only arms this ticket. It must never move SL immediately.
+               RG_MainStatus("Trailing ON - waiting for RF");
+            }
+            else
+            {
+               RG_MainStatus("Trailing OFF");
+            }
+         }
+
+         RG_ProcessPositionManager();
+         RG_UpdateGUI();
+         RG_UpdateFooter();
+
+         return;
+      }
+
       // Close all
       if(sparam==RG_GUI_CLOSE)
       {
@@ -1469,16 +1502,17 @@ void OnChartEvent(
          return;
       }
 
-      // Trailing
-      if(sparam==RG_GUI_TRAILING)
+      // AUTO RISK FREE toggle
+      if(sparam==RG_GUI_AUTO_RF)
       {
-         RG_MainStatus("TRAILING...");
-
-         RG_ProcessTrailing();
-
+         RG_GUI_ToggleAutoRiskFree();
+         RG_MainStatus(
+            RG_AutoRiskFreeEnabled() ?
+            "Auto Risk Free ON" :
+            "Auto Risk Free OFF"
+         );
          RG_UpdateGUI();
          RG_UpdateFooter();
-
          return;
       }
    }

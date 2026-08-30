@@ -8,14 +8,38 @@
 
 void RG_MainStatus(string text);
 
-#define RG_LICENSE_ACCOUNT 180033829
+// Comma-separated list of licensed MT4 account numbers.
+// Add/remove account numbers here without changing the validation logic.
+#define RG_LICENSE_ACCOUNTS "180033829"
 #define RG_LICENSE_SERVER  "Inveslo-Demo"
 
 bool RG_LicenseAccountMatches()
 {
-   if(RG_LICENSE_ACCOUNT<=0)
+   string list=RG_LICENSE_ACCOUNTS;
+   string current=IntegerToString(AccountNumber());
+   int len=StringLen(list);
+   int start=0;
+
+   if(len<=0)
       return(false);
-   return(AccountNumber()==RG_LICENSE_ACCOUNT);
+
+   while(start<len)
+   {
+      int comma=StringFind(list,",",start);
+      if(comma<0)
+         comma=len;
+
+      string item=StringSubstr(list,start,comma-start);
+      StringTrimLeft(item);
+      StringTrimRight(item);
+
+      if(item==current)
+         return(true);
+
+      start=comma+1;
+   }
+
+   return(false);
 }
 
 bool RG_LicenseServerMatches()
@@ -27,7 +51,7 @@ bool RG_LicenseServerMatches()
 
 bool RG_LicenseIsConfigured()
 {
-   return(RG_LICENSE_ACCOUNT>0 && StringLen(RG_LICENSE_SERVER)>0);
+   return(StringLen(RG_LICENSE_ACCOUNTS)>0 && StringLen(RG_LICENSE_SERVER)>0);
 }
 
 bool RG_LicenseIsValid()
