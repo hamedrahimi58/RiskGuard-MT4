@@ -117,7 +117,7 @@ double RG_GetTPLevelPrice(int ticket)
       RG_IsValidManualTP(ticket,manual))
       return(manual);
 
-   if(!UseTakeProfit ||
+   if(!RG_RuntimeUseTakeProfit() ||
       TakeProfit<=0)
       return(0);
 
@@ -315,7 +315,7 @@ bool RG_ProcessTakeProfit(int ticket)
    if(ticket<=0)
       return(false);
 
-   if(!UseTakeProfit)
+   if(!RG_RuntimeUseTakeProfit())
       return(false);
 
    if(!OrderSelect(ticket,SELECT_BY_TICKET))
@@ -325,7 +325,7 @@ bool RG_ProcessTakeProfit(int ticket)
    }
 
    if(OrderSymbol()!=Symbol() ||
-      OrderMagicNumber()!=MagicNumber)
+      OrderMagicNumber()!=RG_RuntimeMagicNumber())
       return(false);
 
    if(OrderType()!=OP_BUY &&
@@ -348,7 +348,7 @@ bool RG_ProcessTakeProfit(int ticket)
 
 void RG_ProcessTakeProfits()
 {
-   if(!UseTakeProfit)
+   if(!RG_RuntimeUseTakeProfit())
       return;
 
    for(int i=OrdersTotal()-1;i>=0;i--)
@@ -359,7 +359,7 @@ void RG_ProcessTakeProfits()
       if(OrderSymbol()!=Symbol())
          continue;
 
-      if(OrderMagicNumber()!=MagicNumber)
+      if(OrderMagicNumber()!=RG_RuntimeMagicNumber())
          continue;
 
       if(OrderType()!=OP_BUY &&

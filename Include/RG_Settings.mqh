@@ -112,11 +112,8 @@ input ENUM_RG_PL_PERIOD PanelPLPeriod = RG_PL_TODAY;
 // TRAILING
 //====================================================
 
-input string RG_SECTION_TRAILING =
-   "========== TRAILING ==========";
-
-// Trailing is controlled per-position from the TR button.
-// Trailing starts only after Risk Free and an additional profit move.
+// Trailing is configured per position from the TR setup window.
+// No trailing parameters are exposed in the main MT4 Inputs dialog.
 enum ENUM_RG_TRAILING_METHOD
 {
    RG_TRAILING_DISTANCE = 0,
@@ -124,10 +121,6 @@ enum ENUM_RG_TRAILING_METHOD
    RG_TRAILING_MOVING   = 2,
    RG_TRAILING_FRACTAL  = 3
 };
-
-input ENUM_RG_TRAILING_METHOD TrailingMethod = RG_TRAILING_DISTANCE;
-input double TrailingStartAfterRFPips = 50.0;
-input double TrailingDistancePips = 100.0;
 
 
 //====================================================

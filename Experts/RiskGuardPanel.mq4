@@ -31,6 +31,7 @@
 
 #include <RG_GUI.mqh>
 #include <RG_License.mqh>
+#include <GUI/RG_TrailingSetup.mqh>
 #include <GUI/RG_TradeVisualization.mqh>
 
 //====================================================
@@ -545,122 +546,15 @@ bool RG_PanelBreakEvenTicket(int ticket)
 }
 
 //====================================================
-// Manual RiskFree = Break Even + commission coverage
-// Recalculates the target from the ORIGINAL open price every time.
-// It intentionally does not depend on the current SL or a "done" flag,
-// so RF remains usable after BE or after a manual SL change.
+// Manual RiskFree
+//
+// RF is deliberately different from BE. The dedicated RF engine
+// requires live price room beyond Entry equal to current Spread +
+// Commission before it will place an RF stop.
 //====================================================
 bool RG_PanelRiskFreeTicket(int ticket)
 {
-   if(ticket<=0)
-      return(false);
-
-   if(!OrderSelect(ticket,SELECT_BY_TICKET))
-      return(false);
-
-   // Stage 3: positions are NOT restricted to the chart symbol.
-   // Ticket is the identity; all market data comes from OrderSymbol().
-   int type=OrderType();
-
-   if(type!=OP_BUY && type!=OP_SELL)
-      return(false);
-
-   string orderSymbol=OrderSymbol();
-
-   double orderBid=
-      MarketInfo(orderSymbol,MODE_BID);
-
-   double orderAsk=
-      MarketInfo(orderSymbol,MODE_ASK);
-
-   int orderDigits=
-      (int)MarketInfo(orderSymbol,MODE_DIGITS);
-
-   double orderPoint=
-      MarketInfo(orderSymbol,MODE_POINT);
-
-   double lots=OrderLots();
-
-   if(lots<=0.0 ||
-      orderBid<=0.0 ||
-      orderAsk<=0.0 ||
-      orderPoint<=0.0)
-      return(false);
-
-   double commissionCost=MathAbs(OrderCommission());
-
-   if(commissionCost<=0.0)
-   {
-      // No commission means commission-neutral RF is exactly BE.
-      return(RG_PanelBreakEvenTicket(ticket));
-   }
-
-   double tickValue=
-      MarketInfo(orderSymbol,MODE_TICKVALUE);
-
-   double tickSize=
-      MarketInfo(orderSymbol,MODE_TICKSIZE);
-
-   if(tickValue<=0.0 ||
-      tickSize<=0.0)
-      return(false);
-
-   // Price distance whose monetary value equals the commission.
-   double commissionDistance=
-      commissionCost*tickSize/(tickValue*lots);
-
-   double openPrice=OrderOpenPrice();
-   double newSL=0.0;
-
-   double stopLevel=
-      MarketInfo(orderSymbol,MODE_STOPLEVEL)*
-      orderPoint;
-
-   if(type==OP_BUY)
-   {
-      newSL=NormalizeDouble(
-         openPrice+commissionDistance,
-         orderDigits
-      );
-
-      // The stop must be below this position symbol's current Bid.
-      if(newSL>=orderBid-stopLevel)
-         return(false);
-   }
-   else
-   {
-      newSL=NormalizeDouble(
-         openPrice-commissionDistance,
-         orderDigits
-      );
-
-      // The stop must be above this position symbol's current Ask.
-      if(newSL<=orderAsk+stopLevel)
-         return(false);
-   }
-
-   ResetLastError();
-   bool result=OrderModify(
-      ticket,
-      OrderOpenPrice(),
-      newSL,
-      OrderTakeProfit(),
-      0,
-      clrNONE
-   );
-
-   if(!result)
-   {
-      Print(
-         "RiskGuard RF failed. Ticket=",ticket,
-         " TargetSL=",DoubleToString(newSL,Digits),
-         " Commission=",DoubleToString(commissionCost,2),
-         " Error=",GetLastError()
-      );
-      return(false);
-   }
-
-   return(true);
+   return(RG_ApplyManualRiskFree(ticket));
 }
 
 //====================================================
@@ -741,9 +635,15 @@ int OnInit()
    RG_RuntimeResetForInputs();
    RG_RuntimeInit();
 
-   // Auto Risk Free is a panel-controlled feature and starts OFF.
-   RG_SetAutoRiskFreeEnabled(false);
+   // Auto Risk Free is panel-controlled. Preserve the user's ON/OFF choice
+   // across chart/EA reinitialization; default to OFF only on first use.
+   string rgAutoRFKey="RG_AUTO_RF_STATE_"+IntegerToString(AccountNumber())+"_"+IntegerToString((int)ChartID());
+   if(GlobalVariableCheck(rgAutoRFKey))
+      RG_SetAutoRiskFreeEnabled(GlobalVariableGet(rgAutoRFKey)>0.5);
+   else
+      RG_SetAutoRiskFreeEnabled(false);
    RG_RuntimeClearPreview();
+   RG_TrailingSetupClose();
    RG_TV_DeleteTradeVisualization();
 
    // Restore a frozen Preview after a timeframe/chart reinitialization.
@@ -783,7 +683,8 @@ int OnInit()
       RG_RuntimeClearPreview();
       RG_RuntimeClearPreviewSnapshot();
       RG_ClearMainPreviewState();
-      RG_TV_DeleteTradeVisualization();
+      RG_TrailingSetupClose();
+   RG_TV_DeleteTradeVisualization();
    }
 
    RG_ProcessPositionManager();
@@ -821,6 +722,7 @@ void OnDeinit(const int reason)
    EventKillTimer();
    ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,false);
 
+   RG_TrailingSetupClose();
    RG_TV_DeleteTradeVisualization();
    RG_DeletePanel();
 
@@ -1150,7 +1052,8 @@ void OnChartEvent(
          RG_RuntimeClearPreview();
          RG_RuntimeClearPreviewSnapshot();
          RG_ClearMainPreviewState();
-         RG_TV_DeleteTradeVisualization();
+         RG_TrailingSetupClose();
+   RG_TV_DeleteTradeVisualization();
 
          RG_SetEditText(
             RG_GUI_ENTRY_INPUT,
@@ -1252,7 +1155,8 @@ void OnChartEvent(
                RG_RuntimeClearPreview();
                RG_RuntimeClearPreviewSnapshot();
                RG_ClearMainPreviewState();
-               RG_TV_DeleteTradeVisualization();
+               RG_TrailingSetupClose();
+   RG_TV_DeleteTradeVisualization();
                RG_ClearPendingMode();
 
                RG_MainStatus(
@@ -1287,7 +1191,8 @@ void OnChartEvent(
                RG_RuntimeClearPreview();
                RG_RuntimeClearPreviewSnapshot();
                RG_ClearMainPreviewState();
-               RG_TV_DeleteTradeVisualization();
+               RG_TrailingSetupClose();
+   RG_TV_DeleteTradeVisualization();
                RG_EnableNativeTradeLevels();
                RG_ClearPendingMode();
 
@@ -1455,7 +1360,7 @@ void OnChartEvent(
          return;
       }
 
-      // Per-position trailing toggle
+      // Per-position trailing setup
       if(RG_GUI_IsPositionObject(
          sparam,RG_GUI_POS_TRAILING))
       {
@@ -1466,23 +1371,22 @@ void OnChartEvent(
 
          if(ticket>0)
          {
-            RG_ToggleTrailing(ticket);
-
-            if(RG_TrailingIsEnabled(ticket))
-            {
-               // TR only arms this ticket. It must never move SL immediately.
-               RG_MainStatus("Trailing ON - waiting for RF");
-            }
-            else
-            {
-               RG_MainStatus("Trailing OFF");
-            }
+            RG_TrailingSetupOpen(ticket);
+            RG_MainStatus("Trailing setup");
          }
 
-         RG_ProcessPositionManager();
          RG_UpdateGUI();
          RG_UpdateFooter();
+         ChartRedraw();
+         return;
+      }
 
+      // Trailing setup window controls
+      if(RG_TrailingSetupHandleClick(sparam))
+      {
+         RG_UpdateGUI();
+         RG_UpdateFooter();
+         ChartRedraw();
          return;
       }
 

@@ -74,7 +74,7 @@ bool RG_ApplyInitialProtection(int ticket)
 
    if(OrderType()==OP_BUY)
    {
-      if(UseStopLoss && runtimeSL>0)
+      if(RG_RuntimeUseStopLoss() && runtimeSL>0)
       {
          sl=
             OrderOpenPrice()-
@@ -87,7 +87,7 @@ bool RG_ApplyInitialProtection(int ticket)
             );
       }
 
-      if(UseTakeProfit && runtimeTP>0)
+      if(RG_RuntimeUseTakeProfit() && runtimeTP>0)
       {
          tp=
             OrderOpenPrice()+
@@ -104,7 +104,7 @@ bool RG_ApplyInitialProtection(int ticket)
 
    else if(OrderType()==OP_SELL)
    {
-      if(UseStopLoss && runtimeSL>0)
+      if(RG_RuntimeUseStopLoss() && runtimeSL>0)
       {
          sl=
             OrderOpenPrice()+
@@ -117,7 +117,7 @@ bool RG_ApplyInitialProtection(int ticket)
             );
       }
 
-      if(UseTakeProfit && runtimeTP>0)
+      if(RG_RuntimeUseTakeProfit() && runtimeTP>0)
       {
          tp=
             OrderOpenPrice()-
@@ -177,7 +177,7 @@ int RG_SendBuyOrder()
          0,
          0,
          "RiskGuard BUY",
-         MagicNumber,
+         RG_RuntimeMagicNumber(),
          0,
          clrNONE
       );
@@ -234,7 +234,7 @@ int RG_SendSellOrder()
          0,
          0,
          "RiskGuard SELL",
-         MagicNumber,
+         RG_RuntimeMagicNumber(),
          0,
          clrNONE
       );

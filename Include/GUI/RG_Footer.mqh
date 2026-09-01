@@ -33,7 +33,7 @@ bool RG_CreateFooter(
 
    RG_CreateLabel(
       RG_PREFIX+"FOOTER_OPEN",
-      "Open : 0 / "+IntegerToString(MaxOpenPositions),
+      "Open : 0 / "+IntegerToString(RG_RuntimeMaxOpenPositions()),
       panelX + 150,
       panelY + 195,
       RG_COLOR_TEXT,
@@ -143,7 +143,7 @@ void RG_UpdateFooter()
          OrdersTotal())
       +" / "
       +IntegerToString(
-         MaxOpenPositions));
+         RG_RuntimeMaxOpenPositions()));
 
    RG_SetLabelText(
       RG_PREFIX+"FOOTER_PROFIT",

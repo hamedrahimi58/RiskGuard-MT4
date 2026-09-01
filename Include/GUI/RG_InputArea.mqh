@@ -31,7 +31,7 @@ bool RG_CreateInputArea(
 
    RG_CreateEdit(
       RG_PREFIX+"LOT",
-      DoubleToString(FixedLot,2),
+      DoubleToString(RG_RuntimeFixedLot(),2),
       panelX + 70,
       panelY + 67,
       RG_EDIT_WIDTH,
@@ -53,7 +53,7 @@ bool RG_CreateInputArea(
 
    RG_CreateEdit(
       RG_PREFIX+"SL",
-      IntegerToString(StopLoss),
+      IntegerToString(RG_RuntimeStopLoss()),
       panelX + 70,
       panelY + 97,
       RG_EDIT_WIDTH,
@@ -75,7 +75,7 @@ bool RG_CreateInputArea(
 
    RG_CreateEdit(
       RG_PREFIX+"TP",
-      IntegerToString(TakeProfit),
+      IntegerToString(RG_RuntimeTakeProfit()),
       panelX + 70,
       panelY + 127,
       RG_EDIT_WIDTH,

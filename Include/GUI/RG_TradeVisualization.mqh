@@ -663,10 +663,10 @@ void RG_TV_DrawDecision(
    double risk=0.0;
    double reward=0.0;
 
-   if(UseStopLoss && sl>0.0)
+   if(RG_RuntimeUseStopLoss() && sl>0.0)
       risk=MathAbs(entry-sl)/Point*dpp;
 
-   if(UseTakeProfit && tp>0.0)
+   if(RG_RuntimeUseTakeProfit() && tp>0.0)
       reward=MathAbs(tp-entry)/Point*dpp;
 
    double rr=0.0;
@@ -946,7 +946,7 @@ bool RG_TV_ValidatePreviewPrices(
    if(entry<=0.0)
       return(false);
 
-   if(UseStopLoss)
+   if(RG_RuntimeUseStopLoss())
    {
       if(sl<=0.0)
          return(false);
@@ -958,7 +958,7 @@ bool RG_TV_ValidatePreviewPrices(
          return(false);
    }
 
-   if(UseTakeProfit)
+   if(RG_RuntimeUseTakeProfit())
    {
       if(tp<=0.0)
          return(false);

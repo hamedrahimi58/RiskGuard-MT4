@@ -1798,7 +1798,7 @@ bool RG_GUI_ParsePreviewFields(
    if(entry<=0 || lot<=0)
       return(false);
 
-   if(UseStopLoss)
+   if(RG_RuntimeUseStopLoss())
    {
       if(sl<=0)
          return(false);
@@ -1816,7 +1816,7 @@ bool RG_GUI_ParsePreviewFields(
       }
    }
 
-   if(UseTakeProfit)
+   if(RG_RuntimeUseTakeProfit())
    {
       if(tp<=0)
          return(false);
@@ -1834,10 +1834,10 @@ bool RG_GUI_ParsePreviewFields(
       }
    }
 
-   if(MaxLot>0 &&
-      lot>MaxLot)
+   if(RG_RuntimeMaxLot()>0 &&
+      lot>RG_RuntimeMaxLot())
    {
-      lot=MaxLot;
+      lot=RG_RuntimeMaxLot();
    }
 
    return(true);
@@ -2053,10 +2053,10 @@ double RG_GUI_CalculateRiskLot(
    if(lotStep<=0)
       lotStep=0.01;
 
-   if(MaxLot>0 &&
-      brokerMaxLot>MaxLot)
+   if(RG_RuntimeMaxLot()>0 &&
+      brokerMaxLot>RG_RuntimeMaxLot())
    {
-      brokerMaxLot=MaxLot;
+      brokerMaxLot=RG_RuntimeMaxLot();
    }
 
    if(lot>brokerMaxLot)
@@ -2227,7 +2227,7 @@ bool RG_GUI_ApplySettings()
    if(entry<=0)
       return(false);
 
-   if(UseStopLoss)
+   if(RG_RuntimeUseStopLoss())
    {
       if(sl<=0)
          return(false);
@@ -2245,7 +2245,7 @@ bool RG_GUI_ApplySettings()
       }
    }
 
-   if(UseTakeProfit)
+   if(RG_RuntimeUseTakeProfit())
    {
       if(tp<=0)
          return(false);
@@ -2273,10 +2273,10 @@ bool RG_GUI_ApplySettings()
    if(lot<=0)
       return(false);
 
-   if(MaxLot>0 &&
-      lot>MaxLot)
+   if(RG_RuntimeMaxLot()>0 &&
+      lot>RG_RuntimeMaxLot())
    {
-      lot=MaxLot;
+      lot=RG_RuntimeMaxLot();
    }
 
    return(
@@ -2507,7 +2507,7 @@ bool RG_GUI_CreateRiskPreview(int direction)
       iATR(
          Symbol(),
          Period(),
-         ATRPeriod,
+         RG_RuntimeATRPeriod(),
          0
       );
 
@@ -2516,7 +2516,7 @@ bool RG_GUI_CreateRiskPreview(int direction)
 
    double distance=
       atr*
-      ATRMultiplier;
+      RG_RuntimeATRMultiplier();
 
    if(distance<=0)
       return(false);
@@ -2545,10 +2545,10 @@ bool RG_GUI_CreateRiskPreview(int direction)
          direction==OP_BUY ?
          entry+
          distance*
-         InitialRR :
+         RG_RuntimeInitialRR() :
          entry-
          distance*
-         InitialRR
+         RG_RuntimeInitialRR()
       );
 
    sl=
@@ -2587,10 +2587,10 @@ bool RG_GUI_CreateRiskPreview(int direction)
    if(lot<=0)
       return(false);
 
-   if(MaxLot>0 &&
-      lot>MaxLot)
+   if(RG_RuntimeMaxLot()>0 &&
+      lot>RG_RuntimeMaxLot())
    {
-      lot=MaxLot;
+      lot=RG_RuntimeMaxLot();
    }
 
    // Calculated Allowed Lot is display/trade-preview data only.
@@ -2660,7 +2660,7 @@ void RG_GUI_UpdatePositionSectionLayout()
       y=5;
 
    // Layout is based on ACTUAL open managed positions.
-   // MaxOpenPositions is a trading limit, not a UI row reservation.
+   // RG_RuntimeMaxOpenPositions() is a trading limit, not a UI row reservation.
    int count=
       RG_GUI_GetPositionCount();
 
@@ -3079,7 +3079,7 @@ bool RG_CreatePanel()
    }
 
    // Layout is based on ACTUAL open managed positions.
-   // MaxOpenPositions is a trading limit, not a UI row reservation.
+   // RG_RuntimeMaxOpenPositions() is a trading limit, not a UI row reservation.
    int count=
       RG_GUI_GetPositionCount();
 
@@ -3442,7 +3442,7 @@ bool RG_CreatePanel()
       L.actionW,
       RG_GUI_BUTTON_H,
       (RG_AutoRiskFreeEnabled() ? RG_GUI_GREEN : RG_GUI_HEADER_BG),
-      clrBlack,
+      (RG_AutoRiskFreeEnabled() ? clrBlack : RG_GUI_TEXT),
       RG_GUI_Z_BUTTON
    );
 
@@ -3624,15 +3624,15 @@ double RG_GUI_ClosedPL()
    datetime now=TimeCurrent();
    datetime start=0;
 
-   if(PanelPLPeriod==RG_PL_TODAY)
+   if(RG_RuntimePanelPLPeriod()==RG_PL_TODAY)
       start=StrToTime(TimeToString(now,TIME_DATE));
-   else if(PanelPLPeriod==RG_PL_WEEK)
+   else if(RG_RuntimePanelPLPeriod()==RG_PL_WEEK)
    {
       datetime dayStart=StrToTime(TimeToString(now,TIME_DATE));
       int dow=TimeDayOfWeek(dayStart);
       start=dayStart-(((dow+6)%7)*86400);
    }
-   else if(PanelPLPeriod==RG_PL_MONTH)
+   else if(RG_RuntimePanelPLPeriod()==RG_PL_MONTH)
    {
       string ds=TimeToString(now,TIME_DATE);
       start=StrToTime(StringSubstr(ds,0,8)+"01");
@@ -3645,7 +3645,7 @@ double RG_GUI_ClosedPL()
          continue;
       if(OrderType()!=OP_BUY && OrderType()!=OP_SELL)
          continue;
-      if(PanelPLPeriod!=RG_PL_ALL && OrderCloseTime()<start)
+      if(RG_RuntimePanelPLPeriod()!=RG_PL_ALL && OrderCloseTime()<start)
          continue;
       total+=OrderProfit()+OrderSwap()+OrderCommission();
    }
@@ -3669,7 +3669,7 @@ void RG_UpdateFooter()
          RG_GUI_MARKET_MAXLOT,
          "Max Lot : "+
          DoubleToString(
-            MaxLot,
+            RG_RuntimeMaxLot(),
             2
          ),
          RG_GUI_MUTED
@@ -3685,7 +3685,7 @@ void RG_UpdateFooter()
          "Active : "+
          IntegerToString(active)+
          "/"+
-         IntegerToString(MaxOpenPositions),
+         IntegerToString(RG_RuntimeMaxOpenPositions()),
          RG_GUI_MUTED
       );
    }
@@ -3707,9 +3707,9 @@ void RG_UpdateFooter()
 
    double closedPL=RG_GUI_ClosedPL();
    string periodName=
-      (PanelPLPeriod==RG_PL_TODAY ? "Today" :
-       PanelPLPeriod==RG_PL_WEEK ? "Week" :
-       PanelPLPeriod==RG_PL_MONTH ? "Month" : "All");
+      (RG_RuntimePanelPLPeriod()==RG_PL_TODAY ? "Today" :
+       RG_RuntimePanelPLPeriod()==RG_PL_WEEK ? "Week" :
+       RG_RuntimePanelPLPeriod()==RG_PL_MONTH ? "Month" : "All");
 
    if(ObjectFind(0,RG_GUI_BALANCE_TEXT)>=0)
    {

@@ -34,13 +34,13 @@ bool RG_CheckVolumeLimit(double lot)
    if(lot<=0)
       return(false);
 
-   if(lot>MaxLot)
+   if(lot>RG_RuntimeMaxLot())
    {
       Print(
          "RiskGuard: Lot limit exceeded. Requested: ",
          DoubleToString(lot,2),
          " Max: ",
-         DoubleToString(MaxLot,2)
+         DoubleToString(RG_RuntimeMaxLot(),2)
       );
 
       return(false);
@@ -99,7 +99,7 @@ double RG_GetVolume()
    // Lot Mode
    //--------------------------------------------------
 
-   switch(LotMode)
+   switch(RG_RuntimeLotMode())
    {
       //------------------------------------------------
       // Fixed Lot
@@ -214,7 +214,7 @@ double RG_CalculatePreviewLot(
    lot=RG_NormalizeLot(lot);
 
    if(lot<=0) return(0);
-   if(MaxLot>0 && lot>MaxLot) lot=RG_NormalizeLot(MaxLot);
+   if(RG_RuntimeMaxLot()>0 && lot>RG_RuntimeMaxLot()) lot=RG_NormalizeLot(RG_RuntimeMaxLot());
 
    return(lot);
 }
@@ -333,7 +333,7 @@ double RG_GetTakeProfitPrice(
       return(0);
 
 
-   if(!UseTakeProfit)
+   if(!RG_RuntimeUseTakeProfit())
       return(0);
 
 

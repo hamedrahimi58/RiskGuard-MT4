@@ -11,7 +11,7 @@ void RG_MainStatus(string text);
 // Comma-separated list of licensed MT4 account numbers.
 // Add/remove account numbers here without changing the validation logic.
 #define RG_LICENSE_ACCOUNTS "180033829"
-#define RG_LICENSE_SERVER  "Inveslo-Demo"
+#define RG_LICENSE_SERVER  ""
 
 bool RG_LicenseAccountMatches()
 {
@@ -44,14 +44,15 @@ bool RG_LicenseAccountMatches()
 
 bool RG_LicenseServerMatches()
 {
+   // Empty server means the license is valid across demo/real and brokers.
    if(StringLen(RG_LICENSE_SERVER)<=0)
-      return(false);
+      return(true);
    return(AccountServer()==RG_LICENSE_SERVER);
 }
 
 bool RG_LicenseIsConfigured()
 {
-   return(StringLen(RG_LICENSE_ACCOUNTS)>0 && StringLen(RG_LICENSE_SERVER)>0);
+   return(StringLen(RG_LICENSE_ACCOUNTS)>0);
 }
 
 bool RG_LicenseIsValid()

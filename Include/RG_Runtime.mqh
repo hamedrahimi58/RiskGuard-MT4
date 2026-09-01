@@ -21,6 +21,22 @@ double g_RG_RiskValue = 0.0;
 int    g_RG_StopLoss   = 0;
 int    g_RG_TakeProfit = 0;
 
+// Live copies of MT4 Inputs. Operational modules consume these values
+// so an input change is propagated immediately on the next timer/tick.
+int    g_RG_MaxOpenPositions = 1;
+double g_RG_MaxLot = 5.0;
+int    g_RG_RiskFreeTriggerPips = 400;
+bool   g_RG_UseStopLoss = true;
+bool   g_RG_UseTakeProfit = true;
+int    g_RG_ATRPeriod = 14;
+double g_RG_ATRMultiplier = 1.0;
+double g_RG_InitialRR = 2.0;
+ENUM_RG_LOT_MODE g_RG_LotMode = LOT_FIXED;
+ENUM_RG_PL_PERIOD g_RG_PanelPLPeriod = RG_PL_TODAY;
+int    g_RG_MagicNumber = 29006;
+bool   g_RG_AllowBuy = true;
+bool   g_RG_AllowSell = true;
+
 bool g_RG_RuntimeReady     = false;
 bool g_RG_SettingsApplied = false;
 
@@ -153,16 +169,29 @@ void RG_RuntimeSyncInputDefaults()
       return;
    }
 
-   if(LotMode==LOT_FIXED)
-   {
-      if(MathAbs(g_RG_FixedLot-FixedLot)>0.0000001)
-         g_RG_FixedLot=FixedLot;
+   // Synchronize every operational Input, not only FixedLot.
+   // This keeps runtime consumers independent from stale cached values.
+   g_RG_MaxOpenPositions=MaxOpenPositions;
+   g_RG_MaxLot=MaxLot;
+   g_RG_RiskFreeTriggerPips=RiskFreeTriggerPips;
+   g_RG_UseStopLoss=UseStopLoss;
+   g_RG_UseTakeProfit=UseTakeProfit;
+   g_RG_ATRPeriod=ATRPeriod;
+   g_RG_ATRMultiplier=ATRMultiplier;
+   g_RG_InitialRR=InitialRR;
+   g_RG_LotMode=LotMode;
+   g_RG_PanelPLPeriod=PanelPLPeriod;
+   g_RG_MagicNumber=MagicNumber;
+   g_RG_AllowBuy=AllowBuy;
+   g_RG_AllowSell=AllowSell;
 
-      if(g_RG_RiskMode==RG_RISK_LOT &&
-         MathAbs(g_RG_RiskValue-FixedLot)>0.0000001)
-      {
-         g_RG_RiskValue=FixedLot;
-      }
+   if(MathAbs(g_RG_FixedLot-FixedLot)>0.0000001)
+      g_RG_FixedLot=FixedLot;
+
+   if(g_RG_RiskMode==RG_RISK_LOT &&
+      MathAbs(g_RG_RiskValue-FixedLot)>0.0000001)
+   {
+      g_RG_RiskValue=FixedLot;
    }
 }
 
@@ -185,6 +214,19 @@ void RG_RuntimeInit()
       g_RG_RiskValue=FixedLot;
    g_RG_StopLoss   = StopLoss;
    g_RG_TakeProfit = TakeProfit;
+   g_RG_MaxOpenPositions = MaxOpenPositions;
+   g_RG_MaxLot = MaxLot;
+   g_RG_RiskFreeTriggerPips = RiskFreeTriggerPips;
+   g_RG_UseStopLoss = UseStopLoss;
+   g_RG_UseTakeProfit = UseTakeProfit;
+   g_RG_ATRPeriod = ATRPeriod;
+   g_RG_ATRMultiplier = ATRMultiplier;
+   g_RG_InitialRR = InitialRR;
+   g_RG_LotMode = LotMode;
+   g_RG_PanelPLPeriod = PanelPLPeriod;
+   g_RG_MagicNumber = MagicNumber;
+   g_RG_AllowBuy = AllowBuy;
+   g_RG_AllowSell = AllowSell;
 
    g_RG_RuntimeReady     = true;
    g_RG_SettingsApplied = false;
@@ -198,6 +240,25 @@ void RG_RuntimeInit()
 
    g_RG_PreviewUsePips = false;
 }
+
+
+//====================================================
+// Live Input getters
+//====================================================
+
+int RG_RuntimeMaxOpenPositions(){ RG_RuntimeInit(); return(g_RG_MaxOpenPositions); }
+double RG_RuntimeMaxLot(){ RG_RuntimeInit(); return(g_RG_MaxLot); }
+int RG_RuntimeRiskFreeTriggerPips(){ RG_RuntimeInit(); return(g_RG_RiskFreeTriggerPips); }
+bool RG_RuntimeUseStopLoss(){ RG_RuntimeInit(); return(g_RG_UseStopLoss); }
+bool RG_RuntimeUseTakeProfit(){ RG_RuntimeInit(); return(g_RG_UseTakeProfit); }
+int RG_RuntimeATRPeriod(){ RG_RuntimeInit(); return(g_RG_ATRPeriod); }
+double RG_RuntimeATRMultiplier(){ RG_RuntimeInit(); return(g_RG_ATRMultiplier); }
+double RG_RuntimeInitialRR(){ RG_RuntimeInit(); return(g_RG_InitialRR); }
+ENUM_RG_LOT_MODE RG_RuntimeLotMode(){ RG_RuntimeInit(); return(g_RG_LotMode); }
+ENUM_RG_PL_PERIOD RG_RuntimePanelPLPeriod(){ RG_RuntimeInit(); return(g_RG_PanelPLPeriod); }
+int RG_RuntimeMagicNumber(){ RG_RuntimeInit(); return(g_RG_MagicNumber); }
+bool RG_RuntimeAllowBuy(){ RG_RuntimeInit(); return(g_RG_AllowBuy); }
+bool RG_RuntimeAllowSell(){ RG_RuntimeInit(); return(g_RG_AllowSell); }
 
 //====================================================
 // Risk mode / value
