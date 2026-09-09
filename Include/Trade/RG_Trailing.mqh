@@ -22,7 +22,8 @@
 #define RG_TR_DEFAULT_MA_PERIOD        20
 #define RG_TR_DEFAULT_MA_METHOD        MODE_EMA
 #define RG_TR_DEFAULT_TIMEFRAME        0
-#define RG_TR_BUFFER_PIPS               1.0
+#define RG_TR_BUFFER_PIPS               5.0
+#define RG_TR_CANDLE_BUFFER_PIPS        5.0
 
 enum ENUM_RG_TR_TIMEFRAME
 {
@@ -81,6 +82,16 @@ string RG_TrailingLastBarKey(int ticket)
    return(RG_TrailingKey("LASTBAR",ticket));
 }
 
+string RG_TrailingCandleStartBarKey(int ticket)
+{
+   return(RG_TrailingKey("CSTARTBAR",ticket));
+}
+
+string RG_TrailingMAStateKey(int ticket)
+{
+   return(RG_TrailingKey("MASTATE",ticket));
+}
+
 bool RG_TrailingIsEnabled(int ticket)
 {
    string key=RG_TrailingStateKey(ticket);
@@ -100,6 +111,8 @@ void RG_TrailingDeleteConfig(int ticket)
    GlobalVariableDel(RG_TrailingMAPeriodKey(ticket));
    GlobalVariableDel(RG_TrailingMAMethodKey(ticket));
    GlobalVariableDel(RG_TrailingLastBarKey(ticket));
+   GlobalVariableDel(RG_TrailingCandleStartBarKey(ticket));
+   GlobalVariableDel(RG_TrailingMAStateKey(ticket));
 }
 
 void RG_TrailingSetConfig(
@@ -167,6 +180,7 @@ void RG_SetTrailingEnabled(int ticket,bool enabled)
    if(enabled)
    {
       GlobalVariableSet(RG_TrailingStateKey(ticket),1.0);
+      GlobalVariableDel(RG_TrailingMAStateKey(ticket));
 
       ENUM_RG_TRAILING_METHOD method;
       double startPips,distancePips;
@@ -178,6 +192,7 @@ void RG_SetTrailingEnabled(int ticket,bool enabled)
    {
       GlobalVariableSet(RG_TrailingStateKey(ticket),0.0);
       GlobalVariableDel(RG_TrailingLastBarKey(ticket));
+      GlobalVariableDel(RG_TrailingCandleStartBarKey(ticket));
    }
 }
 
@@ -293,13 +308,51 @@ bool RG_TrailingHasReachedStart(int ticket)
    double startDistance=startPips*pip;
    double entry=OrderOpenPrice();
 
+   bool reached=false;
+
    if(OrderType()==OP_BUY)
-      return(MarketInfo(sym,MODE_BID)-entry>=startDistance);
+      reached=(MarketInfo(sym,MODE_BID)-entry>=startDistance);
+   else if(OrderType()==OP_SELL)
+      reached=(entry-MarketInfo(sym,MODE_ASK)>=startDistance);
+   else
+      return(false);
 
-   if(OrderType()==OP_SELL)
-      return(entry-MarketInfo(sym,MODE_ASK)>=startDistance);
+   if(!reached)
+      return(false);
 
-   return(false);
+   // Candle trailing has an additional mandatory warm-up:
+   // after RF + Start is first reached, at least TWO candles must
+   // close before Candle trailing is allowed to move the SL.
+   // The activation candle itself is not counted as closed yet.
+   if(method==RG_TRAILING_CANDLE)
+   {
+      int tf=(timeframe==0 ? Period() : timeframe);
+      datetime activationBar=iTime(sym,tf,0);
+      if(activationBar<=0)
+         return(false);
+
+      string startBarKey=RG_TrailingCandleStartBarKey(ticket);
+      datetime storedActivation=0;
+
+      if(GlobalVariableCheck(startBarKey))
+         storedActivation=(datetime)GlobalVariableGet(startBarKey);
+
+      if(storedActivation<=0)
+      {
+         GlobalVariableSet(startBarKey,(double)activationBar);
+         return(false);
+      }
+
+      // Number of completed candles since the activation candle.
+      // 0 = activation candle still open
+      // 1 = first candle closed
+      // 2 = second candle closed -> trailing may start.
+      int shift=iBarShift(sym,tf,storedActivation,true);
+      if(shift<2)
+         return(false);
+   }
+
+   return(true);
 }
 
 bool RG_TrailingBrokerAllowsSL(string sym,int type,double sl)
@@ -392,22 +445,65 @@ bool RG_TrailingCandle(int ticket)
 
    string sym=OrderSymbol();
    int tf=(timeframe==0 ? Period() : timeframe);
-   datetime barTime=iTime(sym,tf,1);
-   if(barTime<=0) return(false);
 
-   // User rule: use one candle BEFORE the latest closed candle => shift 2.
-   double low=iLow(sym,tf,2);
-   double high=iHigh(sym,tf,2);
+   // Process Candle trailing only once for each newly closed candle.
+   // The actual reference candle is one candle before that closed candle.
+   datetime closedBar=iTime(sym,tf,1);
+   if(closedBar<=0) return(false);
+
+   string lastKey=RG_TrailingLastBarKey(ticket);
+   datetime lastBar=0;
+   if(GlobalVariableCheck(lastKey))
+      lastBar=(datetime)GlobalVariableGet(lastKey);
+
+   if(lastBar==closedBar)
+      return(false);
+
+   // Mark this closed candle as processed before attempting the modify.
+   // This prevents repeated OrderModify calls on every tick.
+   GlobalVariableSet(lastKey,(double)closedBar);
+
+   // RiskGuard Candle rule:
+   // C0 = last closed candle (shift 1)
+   // C1 = candle immediately before C0 (shift 2)
+   //
+   // BUY:
+   //   Normally C1 is the reference candle.
+   //   If C0 has a HIGHER Low than C1, C0 becomes the reference.
+   //   Therefore the reference Low is max(Low(C0),Low(C1)).
+   //
+   // SELL:
+   //   Normally C1 is the reference candle.
+   //   If C0 has a LOWER High than C1, C0 becomes the reference.
+   //   Therefore the reference High is min(High(C0),High(C1)).
+   //
+   // SL is never allowed to move backwards. RG_TrailingModify()
+   // enforces that rule for both BUY and SELL, so Distance trailing
+   // remains completely independent and unchanged.
+   double lowC0=iLow(sym,tf,1);
+   double lowC1=iLow(sym,tf,2);
+   double highC0=iHigh(sym,tf,1);
+   double highC1=iHigh(sym,tf,2);
    double pip=RG_TrailingPipSize(sym);
    int digits=(int)MarketInfo(sym,MODE_DIGITS);
-   if(low<=0.0 || high<=0.0 || pip<=0.0) return(false);
+
+   if(lowC0<=0.0 || lowC1<=0.0 || highC0<=0.0 || highC1<=0.0 || pip<=0.0)
+      return(false);
 
    double candidate;
+
    if(OrderType()==OP_BUY)
-      candidate=NormalizeDouble(low-RG_TR_BUFFER_PIPS*pip,digits);
+   {
+      double referenceLow=MathMax(lowC0,lowC1);
+      candidate=NormalizeDouble(referenceLow-RG_TR_CANDLE_BUFFER_PIPS*pip,digits);
+   }
    else if(OrderType()==OP_SELL)
-      candidate=NormalizeDouble(high+RG_TR_BUFFER_PIPS*pip,digits);
-   else return(false);
+   {
+      double referenceHigh=MathMin(highC0,highC1);
+      candidate=NormalizeDouble(referenceHigh+RG_TR_CANDLE_BUFFER_PIPS*pip,digits);
+   }
+   else
+      return(false);
 
    return(RG_TrailingModify(ticket,candidate));
 }
@@ -423,37 +519,120 @@ bool RG_TrailingMovingAverage(int ticket)
 
    string sym=OrderSymbol();
    int tf=(timeframe==0 ? Period() : timeframe);
+
+   // Process MA trailing only once for each newly closed candle.
    datetime closedBar=iTime(sym,tf,1);
    if(closedBar<=0) return(false);
 
    string lastKey=RG_TrailingLastBarKey(ticket);
    datetime lastBar=0;
-   if(GlobalVariableCheck(lastKey)) lastBar=(datetime)GlobalVariableGet(lastKey);
-   if(lastBar==closedBar) return(false);
+   if(GlobalVariableCheck(lastKey))
+      lastBar=(datetime)GlobalVariableGet(lastKey);
+
+   if(lastBar==closedBar)
+      return(false);
+
+   // Mark the candle as processed. This keeps the logic candle-close based.
    GlobalVariableSet(lastKey,(double)closedBar);
 
    double ma=iMA(sym,tf,maPeriod,0,maMethod,PRICE_CLOSE,1);
    double close=iClose(sym,tf,1);
    double pip=RG_TrailingPipSize(sym);
    int digits=(int)MarketInfo(sym,MODE_DIGITS);
-   if(ma<=0.0 || close<=0.0 || pip<=0.0) return(false);
 
-   double candidate;
+   if(ma<=0.0 || close<=0.0 || pip<=0.0)
+      return(false);
 
-   // BUY: a closed candle below MA triggers SL to its Low - 1 pip.
-   if(OrderType()==OP_BUY && close<ma)
+   string stateKey=RG_TrailingMAStateKey(ticket);
+   int state=0;
+   if(GlobalVariableCheck(stateKey))
+      state=(int)GlobalVariableGet(stateKey);
+
+   /*
+      MA Trailing state machine:
+
+      BUY:
+         State 0 = waiting for the first candle to CLOSE below MA.
+         After a trigger, State 1 = waiting for price to CLOSE above MA.
+         Only after returning above MA can another below-MA candle
+         trigger a new SL move.
+
+      SELL:
+         State 0 = waiting for the first candle to CLOSE above MA.
+         After a trigger, State 1 = waiting for price to CLOSE below MA.
+         Only after returning below MA can another above-MA candle
+         trigger a new SL move.
+
+      The first qualifying candle after Start is therefore allowed to
+      trigger immediately. There is NO two-candle warm-up for MA.
+
+      Every trigger places SL 5 pips beyond the trigger candle.
+      RG_TrailingModify() independently guarantees that SL never moves
+      backwards. Distance and Candle trailing are untouched.
+   */
+
+   if(OrderType()==OP_BUY)
    {
-      double low=iLow(sym,tf,1);
-      candidate=NormalizeDouble(low-RG_TR_BUFFER_PIPS*pip,digits);
-      return(RG_TrailingModify(ticket,candidate));
+      if(close<ma)
+      {
+         // First trigger, or a new trigger after price returned above MA.
+         if(state==0)
+         {
+            double low=iLow(sym,tf,1);
+            if(low<=0.0) return(false);
+
+            double candidate=NormalizeDouble(
+               low-RG_TR_CANDLE_BUFFER_PIPS*pip,
+               digits);
+
+            // Arm the opposite-side wait even if the broker rejects the
+            // candidate. The trigger candle itself is not retried every tick.
+            GlobalVariableSet(stateKey,1.0);
+            return(RG_TrailingModify(ticket,candidate));
+         }
+
+         // Still below MA: do not trail again until price closes above MA.
+         return(false);
+      }
+
+      // Close at/above MA resets the state and permits the next
+      // below-MA close to become a fresh trigger.
+      if(close>=ma)
+         GlobalVariableSet(stateKey,0.0);
+
+      return(false);
    }
 
-   // SELL: a closed candle above MA triggers SL to its High + 1 pip.
-   if(OrderType()==OP_SELL && close>ma)
+   if(OrderType()==OP_SELL)
    {
-      double high=iHigh(sym,tf,1);
-      candidate=NormalizeDouble(high+RG_TR_BUFFER_PIPS*pip,digits);
-      return(RG_TrailingModify(ticket,candidate));
+      if(close>ma)
+      {
+         // First trigger, or a new trigger after price returned below MA.
+         if(state==0)
+         {
+            double high=iHigh(sym,tf,1);
+            if(high<=0.0) return(false);
+
+            double candidate=NormalizeDouble(
+               high+RG_TR_CANDLE_BUFFER_PIPS*pip,
+               digits);
+
+            // Arm the opposite-side wait even if the broker rejects the
+            // candidate. The trigger candle itself is not retried every tick.
+            GlobalVariableSet(stateKey,1.0);
+            return(RG_TrailingModify(ticket,candidate));
+         }
+
+         // Still above MA: do not trail again until price closes below MA.
+         return(false);
+      }
+
+      // Close at/below MA resets the state and permits the next
+      // above-MA close to become a fresh trigger.
+      if(close<=ma)
+         GlobalVariableSet(stateKey,0.0);
+
+      return(false);
    }
 
    return(false);

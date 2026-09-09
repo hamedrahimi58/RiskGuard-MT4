@@ -18,6 +18,8 @@
 double g_RG_FixedLot   = 0.0;
 ENUM_RG_RISK_MODE g_RG_RiskMode = RG_RISK_LOT;
 double g_RG_RiskValue = 0.0;
+double g_RG_RiskPercentValue = 1.0;
+double g_RG_RiskDollarValue  = 5.0;
 int    g_RG_StopLoss   = 0;
 int    g_RG_TakeProfit = 0;
 
@@ -73,6 +75,8 @@ void RG_RuntimeSavePreviewSnapshot()
    GlobalVariableSet(p+"usepips",RG_RuntimePreviewUsePips()?1.0:0.0);
    GlobalVariableSet(p+"riskmode",(double)RG_RuntimeRiskMode());
    GlobalVariableSet(p+"riskvalue",RG_RuntimeRiskValue());
+   GlobalVariableSet(p+"riskpercent",g_RG_RiskPercentValue);
+   GlobalVariableSet(p+"riskdollar",g_RG_RiskDollarValue);
    GlobalVariableSet(p+"fixedlot",RG_RuntimeFixedLot());
    GlobalVariableSet(p+"slpoints",(double)RG_RuntimeStopLoss());
    GlobalVariableSet(p+"tppoints",(double)RG_RuntimeTakeProfit());
@@ -98,8 +102,14 @@ bool RG_RuntimeRestorePreviewSnapshot()
 
    if(GlobalVariableCheck(p+"riskmode"))
       g_RG_RiskMode=(ENUM_RG_RISK_MODE)(int)GlobalVariableGet(p+"riskmode");
+   if(GlobalVariableCheck(p+"riskpercent"))
+      g_RG_RiskPercentValue=GlobalVariableGet(p+"riskpercent");
+   if(GlobalVariableCheck(p+"riskdollar"))
+      g_RG_RiskDollarValue=GlobalVariableGet(p+"riskdollar");
    if(GlobalVariableCheck(p+"riskvalue"))
       g_RG_RiskValue=GlobalVariableGet(p+"riskvalue");
+   else
+      g_RG_RiskValue=(g_RG_RiskMode==RG_RISK_PERCENT ? g_RG_RiskPercentValue : (g_RG_RiskMode==RG_RISK_DOLLAR ? g_RG_RiskDollarValue : g_RG_FixedLot));
    if(GlobalVariableCheck(p+"fixedlot"))
       g_RG_FixedLot=GlobalVariableGet(p+"fixedlot");
    if(GlobalVariableCheck(p+"slpoints"))
@@ -130,6 +140,8 @@ void RG_RuntimeClearPreviewSnapshot()
    GlobalVariableDel(p+"usepips");
    GlobalVariableDel(p+"riskmode");
    GlobalVariableDel(p+"riskvalue");
+   GlobalVariableDel(p+"riskpercent");
+   GlobalVariableDel(p+"riskdollar");
    GlobalVariableDel(p+"fixedlot");
    GlobalVariableDel(p+"slpoints");
    GlobalVariableDel(p+"tppoints");
@@ -152,7 +164,9 @@ void RG_RuntimeResetForInputs()
    // from surviving a parameter change.
    g_RG_FixedLot=FixedLot;
    g_RG_RiskMode=DefaultRiskMode;
-   g_RG_RiskValue=(RiskValue>0.0 ? RiskValue : FixedLot);
+   g_RG_RiskPercentValue=1.0;
+   g_RG_RiskDollarValue=5.0;
+   g_RG_RiskValue=(DefaultRiskMode==RG_RISK_PERCENT ? g_RG_RiskPercentValue : (DefaultRiskMode==RG_RISK_DOLLAR ? g_RG_RiskDollarValue : FixedLot));
 }
 
 // Keep the runtime FixedLot synchronized with the current EA input while
@@ -188,11 +202,7 @@ void RG_RuntimeSyncInputDefaults()
    if(MathAbs(g_RG_FixedLot-FixedLot)>0.0000001)
       g_RG_FixedLot=FixedLot;
 
-   if(g_RG_RiskMode==RG_RISK_LOT &&
-      MathAbs(g_RG_RiskValue-FixedLot)>0.0000001)
-   {
-      g_RG_RiskValue=FixedLot;
-   }
+
 }
 
 //====================================================
@@ -209,9 +219,9 @@ void RG_RuntimeInit()
 
    g_RG_FixedLot   = FixedLot;
    g_RG_RiskMode   = DefaultRiskMode;
-   g_RG_RiskValue  = (RiskValue>0.0 ? RiskValue : FixedLot);
-   if(g_RG_RiskMode==RG_RISK_LOT && g_RG_RiskValue<=0.0)
-      g_RG_RiskValue=FixedLot;
+   g_RG_RiskPercentValue = 1.0;
+   g_RG_RiskDollarValue  = 5.0;
+   g_RG_RiskValue  = (g_RG_RiskMode==RG_RISK_PERCENT ? g_RG_RiskPercentValue : (g_RG_RiskMode==RG_RISK_DOLLAR ? g_RG_RiskDollarValue : FixedLot));
    g_RG_StopLoss   = StopLoss;
    g_RG_TakeProfit = TakeProfit;
    g_RG_MaxOpenPositions = MaxOpenPositions;
@@ -274,21 +284,56 @@ void RG_RuntimeSetRiskMode(ENUM_RG_RISK_MODE mode)
 {
    RG_RuntimeInit();
    g_RG_RiskMode=mode;
-   if(mode==RG_RISK_LOT && g_RG_RiskValue<=0.0)
-      g_RG_RiskValue=FixedLot;
+
+   if(mode==RG_RISK_PERCENT)
+      g_RG_RiskValue=g_RG_RiskPercentValue;
+   else
+   if(mode==RG_RISK_DOLLAR)
+      g_RG_RiskValue=g_RG_RiskDollarValue;
+   else
+      g_RG_RiskValue=g_RG_FixedLot;
 }
 
 double RG_RuntimeRiskValue()
 {
    RG_RuntimeInit();
-   return(g_RG_RiskValue);
+
+   if(g_RG_RiskMode==RG_RISK_PERCENT)
+      return(g_RG_RiskPercentValue);
+
+   if(g_RG_RiskMode==RG_RISK_DOLLAR)
+      return(g_RG_RiskDollarValue);
+
+   return(g_RG_FixedLot);
 }
 
 void RG_RuntimeSetRiskValue(double value)
 {
    RG_RuntimeInit();
-   if(value>0.0)
-      g_RG_RiskValue=value;
+   if(value<=0.0)
+      return;
+
+   if(g_RG_RiskMode==RG_RISK_PERCENT)
+      g_RG_RiskPercentValue=value;
+   else
+   if(g_RG_RiskMode==RG_RISK_DOLLAR)
+      g_RG_RiskDollarValue=value;
+   else
+      g_RG_FixedLot=value;
+
+   g_RG_RiskValue=value;
+}
+
+double RG_RuntimeRiskPercentValue()
+{
+   RG_RuntimeInit();
+   return(g_RG_RiskPercentValue);
+}
+
+double RG_RuntimeRiskDollarValue()
+{
+   RG_RuntimeInit();
+   return(g_RG_RiskDollarValue);
 }
 
 //====================================================

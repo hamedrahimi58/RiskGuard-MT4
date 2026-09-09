@@ -664,6 +664,8 @@ int OnInit()
    // Closed-trade history markers are not controlled through
    // an MQL4 ChartSetInteger property.
 
+   RG_SpecialTimesInit();
+
    EventSetTimer(1);
    ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,true);
 
@@ -724,6 +726,7 @@ void OnDeinit(const int reason)
 
    RG_TrailingSetupClose();
    RG_TV_DeleteTradeVisualization();
+   RG_SpecialTimesDelete();
    RG_DeletePanel();
 
    RG_RestoreChartState();
@@ -735,6 +738,8 @@ void OnDeinit(const int reason)
 
 void OnTimer()
 {
+   RG_SpecialTimesUpdate();
+
    if(!RG_LicenseIsValid())
    {
       RG_UpdateGUI();
@@ -761,6 +766,7 @@ void OnTimer()
 void OnTick()
 {
    RefreshRates();
+   RG_SpecialTimesUpdate();
 
    if(!RG_LicenseIsValid())
    {
@@ -786,6 +792,16 @@ void OnTick()
 
    // Preview values are not recalculated from Ask/Bid.
    RG_ProcessTradeVisualization();
+}
+
+void RG_SaveSpecialTimeFromGUI(int i)
+{
+   string tn=RG_GUI_ST_TimeName(i);
+   string ln=RG_GUI_ST_LabelName(i);
+   if(ObjectFind(0,tn)<0 || ObjectFind(0,ln)<0) return;
+   string tm=ObjectGetString(0,tn,OBJPROP_TEXT);
+   string lb=ObjectGetString(0,ln,OBJPROP_TEXT);
+   RG_SpecialTimesSetEvent(i,RG_SpecialTimesGetEnabled(i),tm,lb,RG_SpecialTimesGetColor(i));
 }
 
 //====================================================
@@ -862,43 +878,98 @@ void OnChartEvent(
    }
 
    //=================================================
+   // Special Times are saved by the custom KEYDOWN editor.
+   //=================================================
+
+   //=================================================
+   // STANDARD MT4 OBJ_EDIT FINISH
+   //=================================================
+   if(id==CHARTEVENT_OBJECT_ENDEDIT)
+   {
+      int idx=-1;
+      bool isTime=RG_ST_IsTimeObject(sparam,idx);
+      bool isLabel=RG_ST_IsLabelObject(sparam,idx);
+      if((isTime || isLabel) && idx>=0 && idx<10)
+      {
+         string tn=RG_GUI_ST_TimeName(idx);
+         string ln=RG_GUI_ST_LabelName(idx);
+         string tm=ObjectGetString(0,tn,OBJPROP_TEXT);
+         string lb=ObjectGetString(0,ln,OBJPROP_TEXT);
+
+         if(isTime)
+         {
+            int mins=-1;
+            if(RG_ST_ParseTime(tm,mins))
+               RG_SpecialTimesSetEvent(idx,RG_SpecialTimesGetEnabled(idx),tm,lb,RG_SpecialTimesGetColor(idx));
+            else
+               ObjectSetString(0,tn,OBJPROP_TEXT,RG_SpecialTimesGetTime(idx));
+         }
+         else
+         {
+            if(StringLen(lb)==0) lb="SPECIAL "+IntegerToString(idx+1);
+            RG_SpecialTimesSetEvent(idx,RG_SpecialTimesGetEnabled(idx),tm,lb,RG_SpecialTimesGetColor(idx));
+            ObjectSetString(0,ln,OBJPROP_TEXT,lb);
+         }
+
+         ObjectSetInteger(0,sparam,OBJPROP_SELECTED,false);
+         RG_GUI_UpdateToolsPanel();
+         RG_SpecialTimesUpdate();
+         ChartRedraw();
+         return;
+      }
+   }
+
+   //=================================================
    // CLICK
    //=================================================
 
    if(id==CHARTEVENT_OBJECT_CLICK)
    {
-      // Focus exactly one editable OBJ_EDIT control.
-      // OBJPROP_SELECTED is used only for the clicked edit control.
-      if(
-         sparam==RG_GUI_ENTRY_INPUT ||
-         sparam==RG_GUI_SL_INPUT ||
-         sparam==RG_GUI_TP_INPUT ||
-         sparam==RG_GUI_LOT_INPUT
-      )
+      if(sparam==RG_GUI_TRADE_TAB)
       {
-         string editNames[4];
-         editNames[0]=RG_GUI_ENTRY_INPUT;
-         editNames[1]=RG_GUI_LOT_INPUT;
-         editNames[2]=RG_GUI_SL_INPUT;
-         editNames[3]=RG_GUI_TP_INPUT;
-
-         for(int ei=0;ei<4;ei++)
-         {
-            if(ObjectFind(0,editNames[ei])>=0)
-            {
-               ObjectSetInteger(0,editNames[ei],OBJPROP_READONLY,false);
-               ObjectSetInteger(0,editNames[ei],OBJPROP_SELECTABLE,true);
-               ObjectSetInteger(0,editNames[ei],OBJPROP_HIDDEN,true);
-               ObjectSetInteger(0,editNames[ei],OBJPROP_ZORDER,60000);
-               ObjectSetInteger(0,editNames[ei],OBJPROP_SELECTED,
-                                editNames[ei]==sparam);
-            }
-         }
-
-         ChartRedraw();
+         g_RG_GUI_ToolsOpen=false;
+         RG_CreatePanel();
+         return;
+      }
+      if(sparam==RG_GUI_TOOLS_TAB)
+      {
+         g_RG_GUI_ToolsOpen=true;
+         RG_CreatePanel();
+         return;
+      }
+      if(sparam==RG_GUI_ST_SpecialTimesSectionName())
+      {
+         RG_GUI_ToggleSpecialTimes();
+         return;
+      }
+      if(sparam==RG_GUI_ST_DisplayWindowName())
+      {
+         RG_ST_DisplayWindowMode mode=RG_SpecialTimesGetDisplayWindow();
+         mode=(mode==RG_ST_DISPLAY_MAIN_CHART ? RG_ST_DISPLAY_FIRST_INDICATOR : RG_ST_DISPLAY_MAIN_CHART);
+         RG_SpecialTimesSetDisplayWindow(mode);
+         RG_GUI_UpdateToolsPanel();
+         return;
+      }
+      if(sparam==RG_GUI_ST_LabelModeName())
+      {
+         RG_ST_LabelDisplayMode mode=RG_SpecialTimesGetLabelMode();
+         mode=(mode==RG_ST_LABEL_TIME_AND_LABEL ? RG_ST_LABEL_TIME_ONLY : RG_ST_LABEL_TIME_AND_LABEL);
+         RG_SpecialTimesSetLabelMode(mode);
+         RG_GUI_UpdateToolsPanel();
          return;
       }
 
+      for(int sti2=0;sti2<10;sti2++)
+      {
+         if(sparam==RG_GUI_ST_EnableName(sti2))
+         {
+            RG_SpecialTimesToggleEvent(sti2);
+            RG_GUI_UpdateToolsPanel();
+            return;
+         }
+      }
+      // Time / Label fields are standard MT4 OBJ_EDIT controls.
+      // MT4 handles focus and typing natively; saving occurs on ENDEDIT.
       // PANEL TITLE = collapse / expand the complete panel
       if(sparam==RG_GUI_PANEL_TOGGLE)
       {

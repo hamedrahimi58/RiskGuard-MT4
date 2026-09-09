@@ -447,9 +447,15 @@ void RG_TV_DrawZones(
       // Keep SL information comfortably inside the lower part of the risk zone.
       double riskInfoPrice=sl+(entry-sl)*0.28;
 
+      double riskPips=
+         RG_TV_PipsFromPriceDistance_V2(
+            MathAbs(entry-sl)
+         );
+
       RG_TV_CreateZoneText(
          riskInfoName,
          "SL  "+DoubleToString(sl,digits)+
+         "   "+DoubleToString(riskPips,1)+" pips"+
          "   "+DoubleToString(risk,2)+"$",
          riskInfoPrice,
          clrWhite
@@ -474,9 +480,15 @@ void RG_TV_DrawZones(
       // Keep TP information comfortably inside the upper part of the reward zone.
       double rewardInfoPrice=entry+(tp-entry)*0.78;
 
+      double rewardPips=
+         RG_TV_PipsFromPriceDistance_V2(
+            MathAbs(tp-entry)
+         );
+
       RG_TV_CreateZoneText(
          rewardInfoName,
          "TP  "+DoubleToString(tp,digits)+
+         "   "+DoubleToString(rewardPips,1)+" pips"+
          "   "+DoubleToString(reward,2)+"$",
          rewardInfoPrice,
          clrWhite
@@ -638,6 +650,100 @@ double RG_TV_DollarPerPoint(double lot)
       tickValue*
       (point/tickSize)
    );
+}
+
+bool RG_TV_IsCryptoSymbol(string sym)
+{
+   string u=sym;
+   StringToUpper(u);
+
+   string cryptoKeys[14]=
+   {
+      "BTC","ETH","XRP","LTC",
+      "BCH","ADA","SOL","DOGE",
+      "DOT","BNB","AVAX","LINK",
+      "TRX","MATIC"
+   };
+
+   for(int i=0;i<14;i++)
+   {
+      if(StringFind(u,cryptoKeys[i],0)>=0)
+         return(true);
+   }
+
+   return(false);
+}
+
+double RG_TV_PipsFromPriceDistance_V2(double priceDistance)
+{
+   if(priceDistance<=0.0)
+      return(0.0);
+
+   string sym=Symbol();
+   string u=sym;
+   StringToUpper(u);
+
+   /*
+      RiskGuard display definition:
+
+      Crypto:
+         1.00 price movement = 1 pip.
+
+      Crypto is checked FIRST and is deliberately independent
+      of MODE_POINT.
+
+      Example BTCUSD:
+         81284.471 - 80685.500 = 598.971
+         => 598.971 pips
+   */
+
+   if(RG_TV_IsCryptoSymbol(sym))
+      return(priceDistance);
+
+   double point=MarketInfo(sym,MODE_POINT);
+   int digits=(int)MarketInfo(sym,MODE_DIGITS);
+
+   if(point<=0.0)
+      return(0.0);
+
+   string currencies[8]=
+   {
+      "USD","EUR","GBP","JPY",
+      "CHF","AUD","NZD","CAD"
+   };
+
+   int currencyCount=0;
+
+   for(int i=0;i<8;i++)
+   {
+      if(StringFind(u,currencies[i],0)>=0)
+         currencyCount++;
+   }
+
+   bool isForex=(currencyCount>=2);
+
+   double pipSize=point;
+
+   if(isForex)
+   {
+      if(digits==3 || digits==5)
+         pipSize=point*10.0;
+      else
+         pipSize=point;
+   }
+   else
+   {
+      /*
+         Existing RiskGuard definition for other CFDs:
+         10 broker points = 1 pip.
+      */
+      pipSize=point*10.0;
+   }
+
+   if(pipSize<=0.0)
+      return(0.0);
+
+   return(priceDistance/pipSize);
 }
 
 void RG_TV_DrawDecision(

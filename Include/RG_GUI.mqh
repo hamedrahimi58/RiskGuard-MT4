@@ -7,6 +7,7 @@
 #include <GUI/RG_Edit.mqh>
 #include <Trade/RG_PositionCloser.mqh>
 #include <Trade/RG_RiskFree.mqh>
+#include <RG_SpecialTimes.mqh>
 
 //====================================================
 // RiskGuard MT4
@@ -46,6 +47,9 @@
 #define RG_GUI_CLOSE           RG_PREFIX+"CLOSE_ALL"
 #define RG_GUI_TRAILING        RG_PREFIX+"TRAILING"
 #define RG_GUI_AUTO_RF         RG_PREFIX+"AUTO_RF"
+#define RG_GUI_TRADE_TAB       RG_PREFIX+"TRADE_TAB"
+#define RG_GUI_TOOLS_TAB       RG_PREFIX+"TOOLS_TAB"
+#define RG_GUI_TOOLS_PREFIX    RG_PREFIX+"TOOLS_ST_"
 
 #define RG_GUI_RISK_INFO       RG_PREFIX+"RISK_INFO"
 #define RG_GUI_ALLOWED_LOT_BG  RG_PREFIX+"ALLOWED_LOT_BG"
@@ -132,6 +136,7 @@ int RG_GUI_FS(int base);
 
 #define RG_GUI_PAD             RG_GUI_S(16)
 #define RG_GUI_HEADER_H        RG_GUI_S(50)
+#define RG_GUI_TAB_H           RG_GUI_S(42)
 
 #define RG_GUI_INPUT_W         RG_GUI_S(270)
 #define RG_GUI_INPUT_H         RG_GUI_S(42)
@@ -174,6 +179,8 @@ int  g_RG_GUI_PanelX=0;
 int  g_RG_GUI_PanelY=0;
 bool g_RG_GUI_PanelPositionReady=false;
 
+bool g_RG_GUI_ToolsOpen=false;
+bool g_RG_GUI_SpecialTimesOpen=true;
 bool g_RG_GUI_PanelDragging=false;
 bool g_RG_GUI_PanelDragMoved=false;
 bool g_RG_GUI_PanelMouseScrollWasEnabled=true;
@@ -429,7 +436,7 @@ void RG_GUI_CalculateLayout(
    L.statusY=0;
 
    L.riskY=
-      y+RG_GUI_HEADER_H+RG_GUI_S(8);
+      y+RG_GUI_HEADER_H+RG_GUI_TAB_H+RG_GUI_S(8);
 
    L.previewLotY=
       L.riskY+
@@ -581,6 +588,19 @@ void RG_DeletePanel()
 {
    RG_GUI_DeletePositionObjects();
 
+   // Tools objects are part of the panel lifecycle. Remove them explicitly
+   // so Trade and Tools surfaces can never remain visible behind each other.
+   for(int ti=ObjectsTotal()-1;ti>=0;ti--)
+   {
+      string tn=ObjectName(ti);
+      if(StringFind(tn,RG_GUI_TOOLS_PREFIX,0)==0 ||
+         tn==RG_PREFIX+"TOOLS_BG" ||
+         tn==RG_PREFIX+"TOOLS_TITLE" ||
+         tn==RG_PREFIX+"TOOLS_CLOCK" ||
+         tn==RG_PREFIX+"TOOLS_HINT")
+         ObjectDelete(0,tn);
+   }
+
    for(int i=ObjectsTotal()-1;i>=0;i--)
    {
       string stale=ObjectName(i);
@@ -590,6 +610,11 @@ void RG_DeletePanel()
          RG_PREFIX,
          0)==0)
       {
+         // Special Times belong to the chart timeline, not to the
+         // draggable panel. Never delete them during panel rebuilds.
+         if(StringFind(stale,"RG_ST_",0)==0)
+            continue;
+
          ObjectDelete(0,stale);
       }
    }
@@ -2183,6 +2208,7 @@ void RG_GUI_UpdateRiskInfo()
       OBJPROP_YDISTANCE,
       RG_GUI_GetPanelY()+
       RG_GUI_HEADER_H+
+      RG_GUI_TAB_H+
       8+
       RG_GUI_RISK_H+
       RG_GUI_S(8)+
@@ -2389,13 +2415,13 @@ void RG_GUI_AdjustRisk(int direction)
    double value=
       RG_RuntimeRiskValue();
 
-   double step=0.1;
-   double minimum=0.1;
+   double step=0.5;
+   double minimum=0.5;
 
    if(mode==RG_RISK_DOLLAR)
    {
-      step=1.0;
-      minimum=1.0;
+      step=5.0;
+      minimum=5.0;
    }
 
    value+=
@@ -2440,42 +2466,35 @@ void RG_GUI_SetRiskMode(
 {
    RG_RuntimeSetRiskMode(mode);
 
+   // Each risk mode has its own independent value.
+   // Switching mode must restore that mode's last/default value.
    double value=
       RG_RuntimeRiskValue();
 
    if(mode==RG_RISK_PERCENT)
    {
-      if(value<=0 ||
-         value>100)
-      {
+      if(value<=0.0 || value>100.0)
          value=1.0;
-      }
    }
    else
    if(mode==RG_RISK_DOLLAR)
    {
-      if(value<=0)
-         value=1.0;
+      if(value<=0.0)
+         value=5.0;
    }
    else
    {
-      value=
-         RG_RuntimeFixedLot();
+      value=RG_RuntimeFixedLot();
 
-      if(value<=0)
+      if(value<=0.0)
       {
-         value=
-            MarketInfo(
-               Symbol(),
-               MODE_MINLOT
-            );
+         value=MarketInfo(Symbol(),MODE_MINLOT);
+         if(value<=0.0)
+            value=0.01;
       }
    }
 
-   RG_RuntimeSetRiskValue(
-      value
-   );
-
+   RG_RuntimeSetRiskValue(value);
    RG_GUI_UpdateRiskControls();
 }
 
@@ -2646,6 +2665,11 @@ void RG_GUI_SetPanelHeight(int height)
 void RG_GUI_UpdatePositionSectionLayout()
 {
    if(!g_RG_GUI_PanelExpanded)
+      return;
+
+   // Trade layout must not resize or rewrite the panel while the Tools tab
+   // is active. Tools owns the complete content area in that state.
+   if(g_RG_GUI_ToolsOpen)
       return;
 
    int w=
@@ -3001,6 +3025,254 @@ void RG_GUI_TogglePositions()
 }
 
 //====================================================
+// TOOLS / SPECIAL TIMES
+//====================================================
+
+string RG_GUI_ST_TimeName(int i)
+{
+   return(RG_GUI_TOOLS_PREFIX+"TIME_"+IntegerToString(i+1));
+}
+
+string RG_GUI_ST_LabelName(int i)
+{
+   return(RG_GUI_TOOLS_PREFIX+"LABEL_"+IntegerToString(i+1));
+}
+
+string RG_GUI_ST_EnableName(int i)
+{
+   return(RG_GUI_TOOLS_PREFIX+"ENABLE_"+IntegerToString(i+1));
+}
+
+string RG_GUI_ST_ColorName(int i)
+{
+   return(RG_GUI_TOOLS_PREFIX+"COLOR_"+IntegerToString(i+1));
+}
+
+string RG_GUI_ST_DisplayWindowName()
+{
+   return(RG_GUI_TOOLS_PREFIX+"ST_DISPLAY_WINDOW");
+}
+
+string RG_GUI_ST_LabelModeName()
+{
+   return(RG_GUI_TOOLS_PREFIX+"ST_LABEL_MODE");
+}
+
+string RG_GUI_ST_SpecialTimesSectionName()
+{
+   return(RG_GUI_TOOLS_PREFIX+"SECTION_SPECIAL_TIMES");
+}
+
+string RG_GUI_ST_DisplayLabel(int i,string text)
+{
+   string t=text;
+   StringTrimLeft(t);
+   StringTrimRight(t);
+
+   // NONE means no label at all.
+   if(t=="NONE" || t=="None" || t=="none")
+      return("");
+
+   // The panel uses compact identifiers LB1 ... LB10.
+   // The trader's real label text is still taken from MT4 Inputs and
+   // is used unchanged by the chart Special Times engine.
+   return("LB"+IntegerToString(i+1));
+}
+
+bool RG_GUI_CreateToolEdit(string name,string text,int x,int y,int w,int h)
+{
+   bool exists=(ObjectFind(0,name)>=0);
+   if(!exists)
+   {
+      if(!ObjectCreate(0,name,OBJ_EDIT,0,0,0))
+         return(false);
+   }
+
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,w);
+   ObjectSetInteger(0,name,OBJPROP_YSIZE,h);
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,clrBlack);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clrWhite);
+   ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,clrDimGray);
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,RG_GUI_FS(8));
+   ObjectSetString(0,name,OBJPROP_FONT,RG_GUI_FONT);
+
+   // RG-067-023: Time/Label are edited only from MT4 Inputs.
+   // Keep the panel fields display-only and prevent mouse movement.
+   ObjectSetInteger(0,name,OBJPROP_READONLY,true);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+   ObjectSetInteger(0,name,OBJPROP_BACK,false);
+   ObjectSetInteger(0,name,OBJPROP_ALIGN,ALIGN_LEFT);
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,100);
+
+   // Always refresh the displayed value.  Previously this was done only
+   // when the object was first created, so Reset/Input changes could leave
+   // stale text inside the edit box.
+   ObjectSetString(0,name,OBJPROP_TEXT,text);
+
+   return(true);
+}
+
+void RG_GUI_CreateTabButtons(int x,int y,int w)
+{
+   int gap=RG_GUI_S(6);
+   int inset=RG_GUI_S(7);
+   int bw=(w-(2*inset)-gap)/2;
+   if(bw<80) bw=80;
+   int ty=y+RG_GUI_HEADER_H+RG_GUI_S(5);
+   int th=RG_GUI_TAB_H-RG_GUI_S(8);
+   if(th<24) th=24;
+   bool tools=g_RG_GUI_ToolsOpen;
+   RG_GUI_CreateButton(RG_GUI_TRADE_TAB,"TRADE",x+inset,ty,bw,th,(!tools ? RG_GUI_BLUE : RG_GUI_HEADER_BG),RG_GUI_TEXT,RG_GUI_Z_BUTTON+50);
+   RG_GUI_CreateButton(RG_GUI_TOOLS_TAB,"TOOLS",x+inset+bw+gap,ty,bw,th,(tools ? RG_GUI_BLUE : RG_GUI_HEADER_BG),RG_GUI_TEXT,RG_GUI_Z_BUTTON+50);
+   ObjectSetInteger(0,RG_GUI_TRADE_TAB,OBJPROP_FONTSIZE,RG_GUI_BUTTON_SIZE);
+   ObjectSetInteger(0,RG_GUI_TOOLS_TAB,OBJPROP_FONTSIZE,RG_GUI_BUTTON_SIZE);
+}
+
+void RG_GUI_CreateToolsPanel()
+{
+   if(!g_RG_GUI_ToolsOpen || !g_RG_GUI_PanelExpanded)
+      return;
+
+   int w=RG_GUI_GetPanelWidth();
+   int x=RG_GUI_GetPanelX(w);
+   int y=RG_GUI_GetPanelY();
+   int pw=w;
+   int ph=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(390) : RG_GUI_S(76));
+   int top=y+RG_GUI_HEADER_H+RG_GUI_TAB_H+RG_GUI_S(10);
+
+   RG_GUI_CreateRect(RG_PREFIX+"TOOLS_BG",x,top,pw,ph,RG_GUI_BG,RG_GUI_BORDER,RG_GUI_Z_PANEL+1);
+
+   string sec=RG_GUI_ST_SpecialTimesSectionName();
+   string secText=(g_RG_GUI_SpecialTimesOpen ? "SPECIAL TIMES   [ - ]" : "SPECIAL TIMES   [ + ]");
+   RG_GUI_CreateButton(sec,secText,x+RG_GUI_S(8),top+RG_GUI_S(8),pw-RG_GUI_S(16),RG_GUI_S(32),
+                       RG_GUI_HEADER_BG,RG_GUI_YELLOW,RG_GUI_Z_BUTTON+800);
+   ObjectSetInteger(0,sec,OBJPROP_FONTSIZE,RG_GUI_FS(10));
+
+   if(!g_RG_GUI_SpecialTimesOpen)
+      return;
+
+   // Display controls are panel-level settings; Time and Label remain MT4 Inputs.
+   string dwn=RG_GUI_ST_DisplayWindowName();
+   string lmn=RG_GUI_ST_LabelModeName();
+   bool first=(RG_SpecialTimesGetDisplayWindow()==RG_ST_DISPLAY_FIRST_INDICATOR);
+   bool timeOnly=(RG_SpecialTimesGetLabelMode()==RG_ST_LABEL_TIME_ONLY);
+   int ctrlY=top+RG_GUI_S(70);
+   int ctrlGap=RG_GUI_S(8);
+   int ctrlW=(pw-RG_GUI_S(28)-ctrlGap)/2;
+   RG_GUI_CreateButton(dwn,first ? "WINDOW: 1ST INDICATOR" : "WINDOW: MAIN",
+                       x+RG_GUI_S(10),ctrlY,ctrlW,RG_GUI_S(30),
+                       clrDarkSlateBlue,clrWhite,RG_GUI_Z_BUTTON+800);
+   ObjectSetInteger(0,dwn,OBJPROP_FONTSIZE,RG_GUI_FS(8));
+   RG_GUI_CreateButton(lmn,timeOnly ? "LABEL: TIME ONLY" : "LABEL: TIME + LABEL",
+                       x+RG_GUI_S(10)+ctrlW+ctrlGap,ctrlY,ctrlW,RG_GUI_S(30),
+                       clrDarkGreen,clrWhite,RG_GUI_Z_BUTTON+800);
+   ObjectSetInteger(0,lmn,OBJPROP_FONTSIZE,RG_GUI_FS(8));
+
+   // Two-column layout: 5 events per column.
+   int rowH=RG_GUI_S(48);
+   int rowY=top+RG_GUI_S(112);
+   int colGap=RG_GUI_S(10);
+   int colW=(pw-RG_GUI_S(20)-colGap)/2;
+   if(colW<170) colW=170;
+
+   for(int i=0;i<10;i++)
+   {
+      int col=i/5;
+      int row=i%5;
+      int cx=x+RG_GUI_S(10)+col*(colW+colGap);
+      int yy=rowY+row*rowH;
+
+      string en=RG_GUI_ST_EnableName(i);
+      string tn=RG_GUI_ST_TimeName(i);
+      string ln=RG_GUI_ST_LabelName(i);
+      string cn=RG_GUI_ST_ColorName(i);
+      bool enabled=RG_SpecialTimesGetEnabled(i);
+      color cc=RG_SpecialTimesGetColor(i);
+
+      int onW=RG_GUI_S(38);
+      int timeW=RG_GUI_S(60);
+      int colorW=RG_GUI_S(22);
+      int gap=RG_GUI_S(3);
+      int labelW=RG_GUI_S(58);
+      int maxLabelW=colW-onW-timeW-colorW-(gap*3);
+      if(labelW>maxLabelW) labelW=maxLabelW;
+      if(labelW<48) labelW=48;
+
+      RG_GUI_CreateButton(en,enabled?"ON":"OFF",cx,yy,onW,RG_GUI_S(30),enabled?RG_GUI_GREEN:RG_GUI_HEADER_BG,enabled?clrBlack:RG_GUI_TEXT,RG_GUI_Z_BUTTON+20);
+      RG_GUI_CreateToolEdit(tn,RG_SpecialTimesGetTime(i),cx+onW+gap,yy,timeW,RG_GUI_S(30));
+      ObjectSetInteger(0,tn,OBJPROP_FONTSIZE,RG_GUI_FS(7));
+      RG_GUI_CreateToolEdit(ln,RG_SpecialTimesGetLabel(i),cx+onW+gap+timeW+gap,yy,labelW,RG_GUI_S(30));
+      ObjectSetString(0,ln,OBJPROP_TEXT,RG_GUI_ST_DisplayLabel(i,RG_SpecialTimesGetLabel(i)));
+      ObjectSetInteger(0,ln,OBJPROP_FONTSIZE,RG_GUI_FS(7));
+      RG_GUI_CreateButton(cn," ",cx+colW-colorW,yy,colorW,RG_GUI_S(30),cc,clrBlack,RG_GUI_Z_BUTTON+20);
+   }
+
+   RG_GUI_CreateText(RG_PREFIX+"TOOLS_HINT","Time / Label are edited from MT4 Inputs. Defaults use LB1 ... LB10.",x+RG_GUI_S(12),top+ph-RG_GUI_S(16),RG_GUI_MUTED,RG_GUI_FS(8),RG_GUI_Z_TEXT+10);
+}
+
+void RG_GUI_ToggleSpecialTimes()
+{
+   g_RG_GUI_SpecialTimesOpen=!g_RG_GUI_SpecialTimesOpen;
+   RG_CreatePanel();
+}
+
+void RG_GUI_ToggleTools()
+{
+   g_RG_GUI_ToolsOpen=!g_RG_GUI_ToolsOpen;
+   RG_CreatePanel();
+}
+
+void RG_GUI_UpdateToolsPanel()
+{
+   if(!g_RG_GUI_ToolsOpen) return;
+
+   string sec=RG_GUI_ST_SpecialTimesSectionName();
+   if(ObjectFind(0,sec)>=0)
+      ObjectSetString(0,sec,OBJPROP_TEXT,g_RG_GUI_SpecialTimesOpen ? "SPECIAL TIMES   [ - ]" : "SPECIAL TIMES   [ + ]");
+
+   if(!g_RG_GUI_SpecialTimesOpen) return;
+
+   string dwn=RG_GUI_ST_DisplayWindowName();
+   string lmn=RG_GUI_ST_LabelModeName();
+   if(ObjectFind(0,dwn)>=0)
+   {
+      bool first=(RG_SpecialTimesGetDisplayWindow()==RG_ST_DISPLAY_FIRST_INDICATOR);
+      ObjectSetString(0,dwn,OBJPROP_TEXT,first?"WINDOW: 1ST INDICATOR":"WINDOW: MAIN");
+   }
+   if(ObjectFind(0,lmn)>=0)
+   {
+      bool timeOnly=(RG_SpecialTimesGetLabelMode()==RG_ST_LABEL_TIME_ONLY);
+      ObjectSetString(0,lmn,OBJPROP_TEXT,timeOnly?"LABEL: TIME ONLY":"LABEL: TIME + LABEL");
+   }
+   for(int i=0;i<10;i++)
+   {
+      string en=RG_GUI_ST_EnableName(i);
+      string ln=RG_GUI_ST_LabelName(i);
+      string cn=RG_GUI_ST_ColorName(i);
+      if(ObjectFind(0,en)>=0)
+      {
+         bool v=RG_SpecialTimesGetEnabled(i);
+         ObjectSetString(0,en,OBJPROP_TEXT,v?"ON":"OFF");
+         ObjectSetInteger(0,en,OBJPROP_BGCOLOR,v?RG_GUI_GREEN:RG_GUI_HEADER_BG);
+         ObjectSetInteger(0,en,OBJPROP_COLOR,v?clrBlack:RG_GUI_TEXT);
+      }
+      // Always show the compact identifier for every Special Time.
+      // LB1..LB10 are panel identifiers only; the actual trader label
+      // remains the value entered in MT4 Inputs.
+      if(ObjectFind(0,ln)>=0)
+         ObjectSetString(0,ln,OBJPROP_TEXT,"LB"+IntegerToString(i+1));
+
+      if(ObjectFind(0,cn)>=0)
+         ObjectSetInteger(0,cn,OBJPROP_BGCOLOR,RG_SpecialTimesGetColor(i));
+   }
+}
+
+//====================================================
 // Create Panel
 //====================================================
 
@@ -3102,6 +3374,12 @@ bool RG_CreatePanel()
       L
    );
 
+   if(g_RG_GUI_ToolsOpen)
+   {
+      int toolsH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(390) : RG_GUI_S(76));
+      L.panelH=RG_GUI_HEADER_H+RG_GUI_TAB_H+RG_GUI_S(4)+toolsH+RG_GUI_S(8);
+   }
+
    if(!RG_GUI_CreateRect(
       RG_GUI_PANEL,
       x,
@@ -3140,6 +3418,17 @@ bool RG_CreatePanel()
 
    ObjectSetInteger(0,RG_GUI_PANEL_TOGGLE,OBJPROP_FONTSIZE,RG_GUI_TITLE_SIZE);
    ObjectSetText(RG_GUI_PANEL_TOGGLE,"RiskGuard MT4   [ - ]",RG_GUI_TITLE_SIZE,RG_GUI_FONT,RG_GUI_TEXT);
+
+   RG_GUI_CreateTabButtons(x,y,w);
+   RG_GUI_CreateToolsPanel();
+
+   if(g_RG_GUI_ToolsOpen)
+   {
+      g_RG_GUI_LastChartWidth=
+         (int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0);
+      ChartRedraw();
+      return(true);
+   }
 
    //=================================================
    // RISK ROW
@@ -3759,6 +4048,7 @@ void RG_UpdateGUI()
 {
    RG_RuntimeSyncInputDefaults();
    RefreshRates();
+   RG_GUI_UpdateToolsPanel();
 
    if(ObjectFind(0,RG_GUI_AUTO_RF)>=0)
    {
@@ -3802,6 +4092,11 @@ void RG_UpdateGUI()
    }
 
    if(!g_RG_GUI_PanelExpanded)
+      return;
+
+   // Tools tab has its own content and panel height. Do not run Trade-tab
+   // position/market/footer layout updates while Tools is visible.
+   if(g_RG_GUI_ToolsOpen)
       return;
 
    if(ObjectFind(
@@ -3914,6 +4209,11 @@ void RG_GUI_MovePanelObjects(int dx,int dy)
       // GUI objects use RG_ prefix.
       // Trade visualization uses RGTV_ and is intentionally excluded.
       if(StringFind(name,RG_PREFIX,0)!=0)
+         continue;
+
+      // Special Times are chart-anchored to the bottom edge and must
+      // never move with the draggable RiskGuard panel.
+      if(StringFind(name,"RG_ST_",0)==0)
          continue;
 
       if(ObjectFind(0,name)<0)
