@@ -50,6 +50,515 @@
 #define RG_GUI_TRADE_TAB       RG_PREFIX+"TRADE_TAB"
 #define RG_GUI_TOOLS_TAB       RG_PREFIX+"TOOLS_TAB"
 #define RG_GUI_TOOLS_PREFIX    RG_PREFIX+"TOOLS_ST_"
+#define RG_GUI_NEWS_PREFIX     RG_PREFIX+"TOOLS_NEWS_"
+
+//====================================================
+// NEWS ENGINE - ForexFactory JSON / TODAY ONLY
+//====================================================
+#define RG_NEWS_FF_URL "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+#define RG_NEWS_MAX_EVENTS 128
+#define RG_NEWS_MAX_DISPLAY 12
+#define RG_NEWS_MAX_ROWS 2
+#define RG_NEWS_REFRESH_SEC 300
+#define RG_GUI_FONT_NEWS "Times New Roman"
+#define RG_NEWS_OBJ_PREFIX RG_GUI_NEWS_PREFIX+"EV_"
+
+struct RG_NewsEvent
+{
+   datetime brokerTime;
+   string   currency;
+   string   impact;
+};
+
+RG_NewsEvent g_RG_NewsEvents[RG_NEWS_MAX_EVENTS];
+int g_RG_NewsEventCount=0;
+datetime g_RG_NewsLastFetch=0;
+datetime g_RG_NewsLastAttempt=0;
+string g_RG_NewsRawJson="";
+int g_RG_NewsAppliedCurrency=-1;
+int g_RG_NewsAppliedImpact=-1;
+int g_RG_NewsAppliedTimeframe=-1;
+int g_RG_NewsLastPeriod=-1;
+int g_RG_NewsLastDrawMinute=-1;
+datetime g_RG_NewsNextEventTime=0;
+int g_RG_NewsLastFirstBar=-1;
+int g_RG_NewsLastWidth=-1;
+bool g_RG_NewsDrawDirty=true;
+int g_RG_NewsLastChartHeight=-1;
+double g_RG_NewsLastPriceMax=0.0;
+double g_RG_NewsLastPriceMin=0.0;
+int g_RG_NewsLastDayKey=-1;
+
+string RG_NewsObjName(int i)
+{
+   return(RG_NEWS_OBJ_PREFIX+"TXT_"+IntegerToString(i));
+}
+
+string RG_NewsPinName(int i)
+{
+   return(RG_NEWS_OBJ_PREFIX+"PIN_"+IntegerToString(i));
+}
+
+string RG_NewsLineName(int i)
+{
+   return(RG_NEWS_OBJ_PREFIX+"LINE_"+IntegerToString(i));
+}
+
+void RG_NewsDeleteObjects()
+{
+   for(int i=0;i<RG_NEWS_MAX_DISPLAY;i++)
+   {
+      ObjectDelete(0,RG_NewsObjName(i));
+      ObjectDelete(0,RG_NewsPinName(i));
+      ObjectDelete(0,RG_NewsLineName(i));
+   }
+}
+bool RG_NewsCurrencyAllowed(string cur)
+{
+   if(g_RG_GUI_NewsCurrencyMode==255) return(true);
+   string names[8]={"USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD"};
+   for(int i=0;i<8;i++)
+   {
+      if(cur==names[i])
+         return((g_RG_GUI_NewsCurrencyMode & (1<<i))!=0);
+   }
+   return(false);
+}
+
+bool RG_NewsImpactAllowed(string impact)
+{
+   int bit=0;
+   if(impact=="High") bit=1;
+   else if(impact=="Medium") bit=2;
+   else if(impact=="Low") bit=4;
+   if(bit==0) return(false);
+   return((g_RG_GUI_NewsImpactMode & bit)!=0);
+}
+
+bool RG_NewsTimeframeAllowed()
+{
+   // News is always CURRENT timeframe. It is displayed only on
+   // intraday charts up to H1; H4/D1 and higher are intentionally excluded.
+   int tf=Period();
+   if(tf==PERIOD_M1 || tf==PERIOD_M5 || tf==PERIOD_M15 ||
+      tf==PERIOD_M30 || tf==PERIOD_H1)
+      return(true);
+   return(false);
+}
+
+datetime RG_NewsParseISO(string iso)
+{
+   // ForexFactory returns an ISO-8601 timestamp with an explicit UTC
+   // offset. Convert that timestamp to MT4 broker/server time.
+   // The broker offset is measured directly from the terminal server clock
+   // versus UTC, so the PC local timezone is not used for the conversion.
+   if(StringLen(iso)<19) return(0);
+
+   MqlDateTime dt;
+   ZeroMemory(dt);
+   dt.year=(int)StringToInteger(StringSubstr(iso,0,4));
+   dt.mon =(int)StringToInteger(StringSubstr(iso,5,2));
+   dt.day =(int)StringToInteger(StringSubstr(iso,8,2));
+   dt.hour=(int)StringToInteger(StringSubstr(iso,11,2));
+   dt.min =(int)StringToInteger(StringSubstr(iso,14,2));
+   dt.sec =(int)StringToInteger(StringSubstr(iso,17,2));
+
+   if(dt.year<2000 || dt.mon<1 || dt.mon>12 || dt.day<1 || dt.day>31 ||
+      dt.hour<0 || dt.hour>23 || dt.min<0 || dt.min>59 || dt.sec<0 || dt.sec>59)
+      return(0);
+
+   datetime wall=StructToTime(dt);
+   if(wall<=0) return(0);
+
+   int sign=0;
+   if(StringLen(iso)>19 && StringGetChar(iso,19)=='-') sign=-1;
+   else if(StringLen(iso)>19 && StringGetChar(iso,19)=='+') sign=1;
+
+   int sourceOffset=0;
+   if(sign!=0 && StringLen(iso)>=25)
+   {
+      int oh=(int)StringToInteger(StringSubstr(iso,20,2));
+      int om=(int)StringToInteger(StringSubstr(iso,23,2));
+      if(oh>23 || om>59) return(0);
+      sourceOffset=sign*(oh*3600+om*60);
+   }
+
+   // TimeCurrent() is broker/server time. TimeGMT() is UTC according to
+   // the terminal. Their difference is the broker server UTC offset.
+   int brokerOffset=(int)(TimeCurrent()-TimeGMT());
+
+   // source local -> UTC -> broker server time
+   return(wall-sourceOffset+brokerOffset);
+}
+
+
+string RG_NewsJsonField(string obj,string key)
+{
+   string tag="\""+key+"\":\"";
+   int p=StringFind(obj,tag);
+   if(p<0) return("");
+   p+=StringLen(tag);
+   int e=StringFind(obj,"\"",p);
+   if(e<0) return("");
+   return(StringSubstr(obj,p,e-p));
+}
+
+int RG_NewsDayKey(datetime t)
+{
+   MqlDateTime d;
+   ZeroMemory(d);
+   if(!TimeToStruct(t,d)) return(-1);
+   return(d.year*10000+d.mon*100+d.day);
+}
+
+bool RG_NewsIsToday(datetime t,datetime now)
+{
+   return(RG_NewsDayKey(t)==RG_NewsDayKey(now));
+}
+
+void RG_NewsApplyFilters()
+{
+   g_RG_NewsEventCount=0;
+   if(g_RG_NewsRawJson=="") return;
+
+   int pos=0;
+   int len=StringLen(g_RG_NewsRawJson);
+   datetime now=TimeCurrent();
+
+   while(pos<len && g_RG_NewsEventCount<RG_NEWS_MAX_EVENTS)
+   {
+      int a=StringFind(g_RG_NewsRawJson,"{",pos);
+      if(a<0) break;
+      int b=StringFind(g_RG_NewsRawJson,"}",a+1);
+      if(b<0) break;
+
+      string obj=StringSubstr(g_RG_NewsRawJson,a,b-a+1);
+      string cur=RG_NewsJsonField(obj,"country");
+      string date=RG_NewsJsonField(obj,"date");
+      string impact=RG_NewsJsonField(obj,"impact");
+
+      if(cur!="" && date!="" && impact!="")
+      {
+         datetime bt=RG_NewsParseISO(date);
+         if(bt>now && RG_NewsIsToday(bt,now) && RG_NewsCurrencyAllowed(cur) && RG_NewsImpactAllowed(impact))
+         {
+            // Ignore exact duplicates that can occur in the feed.
+            bool duplicate=false;
+            for(int k=0;k<g_RG_NewsEventCount;k++)
+            {
+               if(g_RG_NewsEvents[k].brokerTime==bt &&
+                  g_RG_NewsEvents[k].currency==cur &&
+                  g_RG_NewsEvents[k].impact==impact)
+               {
+                  duplicate=true;
+                  break;
+               }
+            }
+            if(!duplicate)
+            {
+               g_RG_NewsEvents[g_RG_NewsEventCount].brokerTime=bt;
+               g_RG_NewsEvents[g_RG_NewsEventCount].currency=cur;
+               g_RG_NewsEvents[g_RG_NewsEventCount].impact=impact;
+               g_RG_NewsEventCount++;
+            }
+         }
+      }
+      pos=b+1;
+   }
+
+   // Sort nearest future event first.
+   for(int i=0;i<g_RG_NewsEventCount-1;i++)
+   {
+      int best=i;
+      for(int j=i+1;j<g_RG_NewsEventCount;j++)
+      {
+         if(g_RG_NewsEvents[j].brokerTime < g_RG_NewsEvents[best].brokerTime)
+            best=j;
+      }
+      if(best!=i)
+      {
+         RG_NewsEvent tmp=g_RG_NewsEvents[i];
+         g_RG_NewsEvents[i]=g_RG_NewsEvents[best];
+         g_RG_NewsEvents[best]=tmp;
+      }
+   }
+
+   g_RG_NewsNextEventTime=0;
+   if(g_RG_NewsEventCount>0)
+      g_RG_NewsNextEventTime=g_RG_NewsEvents[0].brokerTime;
+
+   g_RG_NewsLastDayKey=RG_NewsDayKey(now);
+}
+
+bool RG_NewsFetch()
+{
+   char data[];
+   char result[];
+   string headers="";
+   string resultHeaders="";
+   ResetLastError();
+   g_RG_NewsLastAttempt=TimeCurrent();
+
+   int code=WebRequest("GET",RG_NEWS_FF_URL,headers,1500,data,result,resultHeaders);
+   if(code!=200)
+      return(false);
+
+   string json=CharArrayToString(result,0,-1,CP_UTF8);
+   if(StringLen(json)<20)
+      return(false);
+
+   g_RG_NewsRawJson=json;
+   g_RG_NewsLastFetch=TimeCurrent();
+   RG_NewsApplyFilters();
+   g_RG_NewsAppliedCurrency=g_RG_GUI_NewsCurrencyMode;
+   g_RG_NewsAppliedImpact=g_RG_GUI_NewsImpactMode;
+   return(true);
+}
+
+string RG_NewsImpactLetter(string impact)
+{
+   if(impact=="High") return("H");
+   if(impact=="Medium") return("M");
+   return("L");
+}
+
+color RG_NewsImpactColor(string impact)
+{
+   if(impact=="High") return(clrRed);
+   if(impact=="Medium") return(clrOrange);
+   return(clrSilver);
+}
+
+void RG_NewsDraw()
+{
+   RG_NewsDeleteObjects();
+   g_RG_NewsNextEventTime=0;
+
+   if(!g_RG_GUI_NewsEnabled || !RG_NewsTimeframeAllowed())
+   {
+      g_RG_NewsDrawDirty=false;
+      g_RG_NewsLastDrawMinute=-1;
+      return;
+   }
+
+   int chartWidth=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0);
+   int chartHeight=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
+   if(chartWidth<=0 || chartHeight<=0)
+   {
+      g_RG_NewsDrawDirty=false;
+      return;
+   }
+
+   // News markers are screen-positioned vertically: they stay attached to
+   // the bottom of the chart and therefore never follow the live price.
+   // Their X coordinate is recalculated from the real event datetime, so
+   // scrolling/zooming the chart keeps them aligned with the news time.
+   #define RG_NEWS_LANES 12
+   #define RG_NEWS_LABEL_W 62
+   #define RG_NEWS_LANE_H 15
+   #define RG_NEWS_BOTTOM_GAP 24
+   #define RG_NEWS_PIN_GAP 12
+
+   // Use CORNER_LEFT_LOWER for the actual objects.  This makes their
+   // vertical position independent of price, chart scale and chart height.
+   int bottomY=RG_NEWS_BOTTOM_GAP;
+   int pinY=bottomY+RG_NEWS_PIN_GAP;
+
+   int laneRight[RG_NEWS_LANES];
+   for(int l=0;l<RG_NEWS_LANES;l++)
+      laneRight[l]=-1000000;
+
+   datetime now=TimeCurrent();
+   int row=0;
+
+   for(int i=0;i<g_RG_NewsEventCount && row<RG_NEWS_MAX_DISPLAY;i++)
+   {
+      datetime t=g_RG_NewsEvents[i].brokerTime;
+      if(t<=now) continue;
+
+      // Price is used only as a neutral mapping point to obtain the exact
+      // screen X for the event time. The created objects themselves are
+      // OBJ_LABEL objects and are therefore independent of chart price.
+      double mapPrice=(WindowPriceMax(0)+WindowPriceMin(0))/2.0;
+      int x=0,py=0;
+      if(!ChartTimePriceToXY(0,0,t,mapPrice,x,py))
+         continue;
+      if(x<2 || x>chartWidth-2)
+         continue;
+
+      if(g_RG_NewsNextEventTime==0)
+         g_RG_NewsNextEventTime=t;
+
+      int halfW=RG_NEWS_LABEL_W/2;
+      int chosen=-1;
+      for(int lane=0;lane<RG_NEWS_LANES;lane++)
+      {
+         if(x-halfW > laneRight[lane]+3)
+         {
+            chosen=lane;
+            break;
+         }
+      }
+      if(chosen<0)
+      {
+         chosen=0;
+         for(int lane=1;lane<RG_NEWS_LANES;lane++)
+            if(laneRight[lane]<laneRight[chosen])
+               chosen=lane;
+      }
+
+      int labelY=bottomY-(chosen*RG_NEWS_LANE_H);
+      if(labelY<2) labelY=2;
+
+      string txt=TimeToString(t,TIME_MINUTES)+" "+g_RG_NewsEvents[i].currency;
+      color eventColor=RG_NewsImpactColor(g_RG_NewsEvents[i].impact);
+
+      // Pin is also screen-anchored. It marks the same event X and stays
+      // in the bottom chart zone regardless of price movement.
+      string pinName=RG_NewsPinName(row);
+      if(ObjectCreate(0,pinName,OBJ_LABEL,0,0,0))
+      {
+         ObjectSetInteger(0,pinName,OBJPROP_CORNER,CORNER_LEFT_LOWER);
+         ObjectSetInteger(0,pinName,OBJPROP_XDISTANCE,x);
+         ObjectSetInteger(0,pinName,OBJPROP_YDISTANCE,pinY);
+         ObjectSetString(0,pinName,OBJPROP_TEXT,"^");
+         ObjectSetString(0,pinName,OBJPROP_FONT,"Arial");
+         ObjectSetInteger(0,pinName,OBJPROP_FONTSIZE,RG_GUI_FS(9));
+         ObjectSetInteger(0,pinName,OBJPROP_COLOR,eventColor);
+         ObjectSetInteger(0,pinName,OBJPROP_ANCHOR,ANCHOR_CENTER);
+         ObjectSetInteger(0,pinName,OBJPROP_SELECTABLE,false);
+         ObjectSetInteger(0,pinName,OBJPROP_SELECTED,false);
+         ObjectSetInteger(0,pinName,OBJPROP_HIDDEN,true);
+         ObjectSetInteger(0,pinName,OBJPROP_BACK,false);
+      }
+
+      string name=RG_NewsObjName(row);
+      if(ObjectCreate(0,name,OBJ_LABEL,0,0,0))
+      {
+         ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_LOWER);
+         ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
+         ObjectSetInteger(0,name,OBJPROP_YDISTANCE,labelY);
+         ObjectSetString(0,name,OBJPROP_TEXT,txt);
+         ObjectSetString(0,name,OBJPROP_FONT,RG_GUI_FONT_NEWS);
+         ObjectSetInteger(0,name,OBJPROP_FONTSIZE,RG_GUI_FS(8));
+         ObjectSetInteger(0,name,OBJPROP_COLOR,eventColor);
+         ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_CENTER);
+         ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+         ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+         ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+         ObjectSetInteger(0,name,OBJPROP_BACK,false);
+      }
+
+      laneRight[chosen]=x+halfW;
+      row++;
+   }
+
+   g_RG_NewsLastDrawMinute=(int)(now/60);
+   g_RG_NewsLastPeriod=Period();
+   g_RG_NewsAppliedTimeframe=1;
+   g_RG_NewsLastFirstBar=(int)ChartGetInteger(0,CHART_FIRST_VISIBLE_BAR,0);
+   g_RG_NewsLastWidth=chartWidth;
+   g_RG_NewsLastChartHeight=chartHeight;
+   g_RG_NewsDrawDirty=false;
+   ChartRedraw();
+}
+
+void RG_NewsEngineUpdate()
+{
+   if(!g_RG_GUI_NewsEnabled)
+   {
+      if(g_RG_NewsLastDrawMinute>=0)
+      {
+         RG_NewsDeleteObjects();
+         g_RG_NewsLastDrawMinute=-1;
+      }
+      g_RG_NewsDrawDirty=false;
+      return;
+   }
+
+   if(!RG_NewsTimeframeAllowed())
+   {
+      if(g_RG_NewsLastDrawMinute>=0)
+      {
+         RG_NewsDeleteObjects();
+         g_RG_NewsLastDrawMinute=-1;
+      }
+      g_RG_NewsDrawDirty=false;
+      return;
+   }
+
+   if(g_RG_NewsLastPeriod!=Period())
+      g_RG_NewsDrawDirty=true;
+
+   // Rebuild the filtered list when the broker trading day changes.
+   // News is intentionally limited to the current broker/server date.
+   datetime now=TimeCurrent();
+   int dayKey=RG_NewsDayKey(now);
+   if(g_RG_NewsLastDayKey!=dayKey)
+   {
+      if(g_RG_NewsRawJson!="")
+         RG_NewsApplyFilters();
+      g_RG_NewsDrawDirty=true;
+   }
+
+   int firstBar=(int)ChartGetInteger(0,CHART_FIRST_VISIBLE_BAR,0);
+   if(g_RG_NewsLastFirstBar!=firstBar)
+      g_RG_NewsDrawDirty=true;
+
+   int chartWidth=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0);
+   int chartHeight=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
+   if(g_RG_NewsLastWidth!=chartWidth || g_RG_NewsLastChartHeight!=chartHeight)
+      g_RG_NewsDrawDirty=true;
+
+   // Redraw only when the nearest displayed event has expired.
+   if(g_RG_NewsNextEventTime>0 && TimeCurrent()>=g_RG_NewsNextEventTime)
+      g_RG_NewsDrawDirty=true;
+
+   if(g_RG_NewsAppliedCurrency!=g_RG_GUI_NewsCurrencyMode ||
+      g_RG_NewsAppliedImpact!=g_RG_GUI_NewsImpactMode)
+   {
+      RG_NewsApplyFilters();
+      g_RG_NewsAppliedCurrency=g_RG_GUI_NewsCurrencyMode;
+      g_RG_NewsAppliedImpact=g_RG_GUI_NewsImpactMode;
+      g_RG_NewsDrawDirty=true;
+   }
+
+   // Network access is deliberately performed only from the 1-second timer,
+   // never from RG_UpdateGUI/OnTick. A short timeout prevents MT4 from
+   // becoming unresponsive when the feed is unreachable.
+   if(g_RG_NewsLastFetch==0 || TimeCurrent()-g_RG_NewsLastFetch>=RG_NEWS_REFRESH_SEC)
+   {
+      if(g_RG_NewsLastAttempt==0 || TimeCurrent()-g_RG_NewsLastAttempt>=120)
+      {
+         if(RG_NewsFetch())
+            g_RG_NewsDrawDirty=true;
+      }
+   }
+
+   if(g_RG_NewsDrawDirty)
+      RG_NewsDraw();
+}
+
+// Called immediately after a News selector/toggle action. It never performs
+// network access; this keeps the panel responsive. Existing cached data is
+// applied/drawn immediately and a fresh feed is picked up by the timer.
+void RG_NewsUiChanged()
+{
+   g_RG_NewsDrawDirty=true;
+   if(g_RG_GUI_NewsEnabled && g_RG_NewsRawJson!="")
+   {
+      RG_NewsApplyFilters();
+      g_RG_NewsAppliedCurrency=g_RG_GUI_NewsCurrencyMode;
+      g_RG_NewsAppliedImpact=g_RG_GUI_NewsImpactMode;
+      if(RG_NewsTimeframeAllowed())
+         RG_NewsDraw();
+   }
+   else if(!g_RG_GUI_NewsEnabled)
+   {
+      RG_NewsDeleteObjects();
+      g_RG_NewsLastDrawMinute=-1;
+   }
+}
 
 #define RG_GUI_RISK_INFO       RG_PREFIX+"RISK_INFO"
 #define RG_GUI_ALLOWED_LOT_BG  RG_PREFIX+"ALLOWED_LOT_BG"
@@ -181,6 +690,12 @@ bool g_RG_GUI_PanelPositionReady=false;
 
 bool g_RG_GUI_ToolsOpen=false;
 bool g_RG_GUI_SpecialTimesOpen=true;
+bool g_RG_GUI_NewsOpen=true;
+bool g_RG_GUI_NewsEnabled=false;
+int  g_RG_GUI_NewsTimeframe=1;
+int  g_RG_GUI_NewsCurrencyMode=255;
+int  g_RG_GUI_NewsImpactMode=1;
+int  g_RG_GUI_NewsSelector=0;
 bool g_RG_GUI_PanelDragging=false;
 bool g_RG_GUI_PanelDragMoved=false;
 bool g_RG_GUI_PanelMouseScrollWasEnabled=true;
@@ -610,9 +1125,10 @@ void RG_DeletePanel()
          RG_PREFIX,
          0)==0)
       {
-         // Special Times belong to the chart timeline, not to the
-         // draggable panel. Never delete them during panel rebuilds.
-         if(StringFind(stale,"RG_ST_",0)==0)
+         // Special Times and News belong to the chart timeline, not to
+         // the draggable panel. Never delete them during panel rebuilds.
+         if(StringFind(stale,"RG_ST_",0)==0 ||
+            StringFind(stale,RG_NEWS_OBJ_PREFIX,0)==0)
             continue;
 
          ObjectDelete(0,stale);
@@ -3063,6 +3579,309 @@ string RG_GUI_ST_SpecialTimesSectionName()
    return(RG_GUI_TOOLS_PREFIX+"SECTION_SPECIAL_TIMES");
 }
 
+//====================================================
+// TOOLS / NEWS FOUNDATION
+//====================================================
+
+string RG_GUI_NewsSectionName()
+{
+   return(RG_GUI_NEWS_PREFIX+"SECTION");
+}
+
+string RG_GUI_NewsEnableName()
+{
+   return(RG_GUI_NEWS_PREFIX+"ENABLE");
+}
+
+string RG_GUI_NewsTimeframeName()
+{
+   return(RG_GUI_NEWS_PREFIX+"TIMEFRAME");
+}
+
+string RG_GUI_NewsCurrencyName()
+{
+   return(RG_GUI_NEWS_PREFIX+"CURRENCY");
+}
+
+string RG_GUI_NewsImpactName()
+{
+   return(RG_GUI_NEWS_PREFIX+"IMPACT");
+}
+
+string RG_GUI_NewsSourceName()
+{
+   return(RG_GUI_NEWS_PREFIX+"SOURCE");
+}
+
+string RG_GUI_NewsStatusName()
+{
+   return(RG_GUI_NEWS_PREFIX+"STATUS");
+}
+
+string RG_GUI_NewsTFItemName(int i)
+{ return(RG_GUI_NEWS_PREFIX+"TF_ITEM_"+IntegerToString(i)); }
+string RG_GUI_NewsCurrencyItemName(int i)
+{ return(RG_GUI_NEWS_PREFIX+"CUR_ITEM_"+IntegerToString(i)); }
+string RG_GUI_NewsImpactItemName(int i)
+{ return(RG_GUI_NEWS_PREFIX+"IMP_ITEM_"+IntegerToString(i)); }
+string RG_GUI_NewsDoneName()
+{ return(RG_GUI_NEWS_PREFIX+"SELECT_DONE"); }
+
+string RG_GUI_NewsTimeframeText()
+{
+   return("TF: CURRENT");
+}
+
+string RG_GUI_NewsCurrencyText()
+{
+   if(g_RG_GUI_NewsCurrencyMode==255) return("CUR: ALL");
+   if(g_RG_GUI_NewsCurrencyMode==0) return("CUR: NONE");
+   string result="CUR: ";
+   string names[8]={"USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD"};
+   bool first=true;
+   for(int i=0;i<8;i++)
+   {
+      if((g_RG_GUI_NewsCurrencyMode & (1<<i))!=0)
+      {
+         if(!first) result+="+";
+         result+=names[i];
+         first=false;
+      }
+   }
+   return(result);
+}
+
+string RG_GUI_NewsImpactText()
+{
+   if(g_RG_GUI_NewsImpactMode==7) return("IMP: ALL");
+   if(g_RG_GUI_NewsImpactMode==3) return("IMP: HIGH+MED");
+   if(g_RG_GUI_NewsImpactMode==5) return("IMP: HIGH+LOW");
+   if(g_RG_GUI_NewsImpactMode==6) return("IMP: MED+LOW");
+   if(g_RG_GUI_NewsImpactMode==4) return("IMP: LOW");
+   if(g_RG_GUI_NewsImpactMode==2) return("IMP: MED");
+   return("IMP: HIGH");
+}
+
+void RG_GUI_DeleteNewsSelectorObjects()
+{
+   for(int i=0;i<8;i++)
+      ObjectDelete(0,RG_GUI_NewsTFItemName(i));
+   for(int i=0;i<9;i++)
+      ObjectDelete(0,RG_GUI_NewsCurrencyItemName(i));
+   for(int i=0;i<4;i++)
+      ObjectDelete(0,RG_GUI_NewsImpactItemName(i));
+   ObjectDelete(0,RG_GUI_NewsDoneName());
+   ObjectDelete(0,RG_GUI_NEWS_PREFIX+"CURRENT");
+}
+
+void RG_GUI_DeleteNewsFooter()
+{
+   ObjectDelete(0,RG_GUI_NewsSourceName());
+   ObjectDelete(0,RG_GUI_NewsStatusName());
+   ObjectDelete(0,RG_GUI_NEWS_PREFIX+"FUTURE");
+}
+
+void RG_GUI_RefreshNewsPanel()
+{
+   if(!g_RG_GUI_ToolsOpen || !g_RG_GUI_PanelExpanded)
+      return;
+
+   int w=RG_GUI_GetPanelWidth();
+   int x=RG_GUI_GetPanelX(w);
+   int y=RG_GUI_GetPanelY();
+   int pw=w;
+   int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(414) : RG_GUI_S(76));
+   int newsH=RG_GUI_S(176);
+   if(!g_RG_GUI_NewsOpen)
+      newsH=RG_GUI_S(42);
+   else if(g_RG_GUI_NewsSelector==2)
+      newsH=RG_GUI_S(286);
+   else if(g_RG_GUI_NewsSelector==3)
+      newsH=RG_GUI_S(226);
+
+   int ph=specialH+newsH+RG_GUI_S(12);
+   int top=y+RG_GUI_HEADER_H+RG_GUI_TAB_H+RG_GUI_S(10);
+
+   // Keep the outer panel synchronized with the expanded selector.
+   // Previously only TOOLS_BG was resized, so Currency/Impact/Time
+   // option boxes could extend outside the main RiskGuard panel.
+   string panelName=RG_GUI_PANEL;
+   if(ObjectFind(0,panelName)>=0)
+   {
+      int outerH=RG_GUI_HEADER_H+RG_GUI_TAB_H+RG_GUI_S(12)+ph;
+      ObjectSetInteger(0,panelName,OBJPROP_YSIZE,outerH);
+   }
+   string bg=RG_PREFIX+"TOOLS_BG";
+   if(ObjectFind(0,bg)>=0)
+   {
+      ObjectSetInteger(0,bg,OBJPROP_XDISTANCE,x);
+      ObjectSetInteger(0,bg,OBJPROP_YDISTANCE,top);
+      ObjectSetInteger(0,bg,OBJPROP_XSIZE,pw);
+      ObjectSetInteger(0,bg,OBJPROP_YSIZE,ph);
+   }
+
+   int newsTop=top+specialH+RG_GUI_S(8);
+   string ns=RG_GUI_NewsSectionName();
+   if(ObjectFind(0,ns)<0)
+      RG_GUI_CreateButton(ns,g_RG_GUI_NewsOpen ? "NEWS   [ - ]" : "NEWS   [ + ]",x+RG_GUI_S(8),newsTop,pw-RG_GUI_S(16),RG_GUI_S(32),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+800);
+   else
+   {
+      ObjectSetInteger(0,ns,OBJPROP_XDISTANCE,x+RG_GUI_S(8));
+      ObjectSetInteger(0,ns,OBJPROP_YDISTANCE,newsTop);
+      ObjectSetInteger(0,ns,OBJPROP_XSIZE,pw-RG_GUI_S(16));
+      ObjectSetInteger(0,ns,OBJPROP_YSIZE,RG_GUI_S(32));
+      ObjectSetString(0,ns,OBJPROP_TEXT,g_RG_GUI_NewsOpen ? "NEWS   [ - ]" : "NEWS   [ + ]");
+   }
+   ObjectSetInteger(0,ns,OBJPROP_FONTSIZE,RG_GUI_FS(10));
+
+   if(!g_RG_GUI_NewsOpen)
+   {
+      ObjectDelete(0,RG_GUI_NewsEnableName());
+      ObjectDelete(0,RG_GUI_NewsCurrencyName());
+      ObjectDelete(0,RG_GUI_NewsImpactName());
+      RG_GUI_DeleteNewsSelectorObjects();
+      RG_GUI_DeleteNewsFooter();
+      ChartRedraw();
+      return;
+   }
+
+   int ny=newsTop+RG_GUI_S(42);
+   int gap=RG_GUI_S(6);
+   int bw=(pw-RG_GUI_S(20)-gap)/2;
+   if(bw<100) bw=100;
+   string ne=RG_GUI_NewsEnableName();
+   string nc=RG_GUI_NewsCurrencyName();
+   string ni=RG_GUI_NewsImpactName();
+
+   // News timeframe is fixed to CURRENT. It is not configurable.
+   // News is automatically suppressed on H4/D1/W1/MN1.
+   RG_GUI_CreateButton(ne,g_RG_GUI_NewsEnabled?"NEWS: ON":"NEWS: OFF",x+RG_GUI_S(10),ny,bw,RG_GUI_S(30),g_RG_GUI_NewsEnabled?RG_GUI_GREEN:RG_GUI_HEADER_BG,g_RG_GUI_NewsEnabled?clrBlack:RG_GUI_TEXT,RG_GUI_Z_BUTTON+810);
+   // Timeframe is intentionally not configurable. News always uses CURRENT
+   // and is automatically disabled on H4 and higher.  Use plain text rather
+   // than a button so no hidden Timeframe selector can open or overflow.
+   RG_GUI_CreateButton(RG_GUI_NewsTimeframeName(), "TF: CURRENT", x+RG_GUI_S(10)+bw+gap, ny, bw, RG_GUI_S(30), RG_GUI_HEADER_BG, clrWhite, RG_GUI_Z_BUTTON+810);
+   ObjectSetInteger(0,RG_GUI_NewsTimeframeName(),OBJPROP_FONTSIZE,RG_GUI_FS(9));
+   ny+=RG_GUI_S(36);
+   RG_GUI_CreateButton(nc,RG_GUI_NewsCurrencyText(),x+RG_GUI_S(10),ny,bw,RG_GUI_S(30),clrDarkGreen,clrWhite,RG_GUI_Z_BUTTON+810);
+   RG_GUI_CreateButton(ni,RG_GUI_NewsImpactText(),x+RG_GUI_S(10)+bw+gap,ny,bw,RG_GUI_S(30),clrDarkRed,clrWhite,RG_GUI_Z_BUTTON+810);
+   ny+=RG_GUI_S(42);
+
+   RG_GUI_DeleteNewsSelectorObjects();
+   RG_GUI_DeleteNewsFooter();
+
+   if(g_RG_GUI_NewsSelector==2)
+   {
+      int sg=RG_GUI_S(5);
+      int sw=(pw-RG_GUI_S(20)-2*sg)/3;
+      string curNames[9]={"USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD","ALL"};
+      for(int i=0;i<9;i++)
+      {
+         int col=i%3; int row=i/3;
+         int sx=x+RG_GUI_S(10)+col*(sw+sg);
+         int sy=ny+row*RG_GUI_S(30);
+         bool sel=(i==8 ? g_RG_GUI_NewsCurrencyMode==255 : g_RG_GUI_NewsCurrencyMode!=255 && (g_RG_GUI_NewsCurrencyMode&(1<<i))!=0);
+         RG_GUI_CreateButton(RG_GUI_NewsCurrencyItemName(i),curNames[i],sx,sy,sw,RG_GUI_S(26),sel?RG_GUI_GREEN:RG_GUI_HEADER_BG,sel?clrBlack:RG_GUI_TEXT,RG_GUI_Z_BUTTON+850);
+      }
+      RG_GUI_CreateButton(RG_GUI_NewsDoneName(),"DONE",x+RG_GUI_S(10),ny+2*RG_GUI_S(30),pw-RG_GUI_S(20),RG_GUI_S(26),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+850);
+   }
+   else if(g_RG_GUI_NewsSelector==3)
+   {
+      int sg=RG_GUI_S(5);
+      int sw=(pw-RG_GUI_S(20)-2*sg)/3;
+      string impNames[4]={"HIGH","MED","LOW","ALL"};
+      for(int i=0;i<4;i++)
+      {
+         int col=i%3; int row=i/3;
+         int sx=x+RG_GUI_S(10)+col*(sw+sg);
+         int sy=ny+row*RG_GUI_S(30);
+         bool sel=(i==0?((g_RG_GUI_NewsImpactMode&1)!=0):i==1?((g_RG_GUI_NewsImpactMode&2)!=0):i==2?((g_RG_GUI_NewsImpactMode&4)!=0):g_RG_GUI_NewsImpactMode==7);
+         RG_GUI_CreateButton(RG_GUI_NewsImpactItemName(i),impNames[i],sx,sy,sw,RG_GUI_S(26),sel?RG_GUI_RED:RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+850);
+      }
+      RG_GUI_CreateButton(RG_GUI_NewsDoneName(),"DONE",x+RG_GUI_S(10),ny+2*RG_GUI_S(30),pw-RG_GUI_S(20),RG_GUI_S(26),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+850);
+   }
+   else
+   {
+      int infoY=newsTop+RG_GUI_S(116);
+      RG_GUI_CreateText(RG_GUI_NewsSourceName(),"SOURCE: FOREXFACTORY",x+RG_GUI_S(12),infoY,RG_GUI_MUTED,RG_GUI_FS(7),RG_GUI_Z_TEXT+20);
+      RG_GUI_CreateText(RG_GUI_NewsStatusName(),"TIME + CURRENCY + IMPACT | SERVER TIME",x+RG_GUI_S(12),infoY+RG_GUI_S(14),RG_GUI_MUTED,RG_GUI_FS(6),RG_GUI_Z_TEXT+20);
+      RG_GUI_CreateText(RG_GUI_NEWS_PREFIX+"FUTURE","TODAY NEWS ONLY",x+RG_GUI_S(12),infoY+RG_GUI_S(28),RG_GUI_MUTED,RG_GUI_FS(6),RG_GUI_Z_TEXT+20);
+   }
+   ChartRedraw();
+}
+
+void RG_GUI_ToggleNews()
+{
+   g_RG_GUI_NewsEnabled=!g_RG_GUI_NewsEnabled;
+   RG_GUI_RefreshNewsPanel();
+   RG_NewsUiChanged();
+}
+void RG_GUI_ToggleNewsPanel()
+{
+   g_RG_GUI_NewsTimeframe=1;
+   g_RG_GUI_NewsOpen=!g_RG_GUI_NewsOpen;
+   g_RG_GUI_NewsSelector=0;
+   RG_GUI_RefreshNewsPanel();
+   RG_NewsUiChanged();
+}
+void RG_GUI_OpenNewsSelector(int mode)
+{
+   // Timeframe selection was intentionally removed. News is always CURRENT.
+   if(mode!=2 && mode!=3) return;
+   g_RG_GUI_NewsSelector=(g_RG_GUI_NewsSelector==mode ? 0 : mode);
+   RG_GUI_RefreshNewsPanel();
+   RG_NewsUiChanged();
+}
+
+void RG_GUI_SelectNewsTimeframe(int index)
+{
+   // Intentionally disabled: News always uses CURRENT timeframe.
+   g_RG_GUI_NewsTimeframe=1;
+}
+
+void RG_GUI_ToggleNewsCurrency(int index)
+{
+   if(index<0 || index>8) return;
+   if(index==8) { g_RG_GUI_NewsCurrencyMode=255; RG_GUI_RefreshNewsPanel();
+   RG_NewsUiChanged(); return; }
+   if(g_RG_GUI_NewsCurrencyMode==255) g_RG_GUI_NewsCurrencyMode=0;
+   int bit=(1<<index);
+   if((g_RG_GUI_NewsCurrencyMode & bit)!=0) g_RG_GUI_NewsCurrencyMode &= ~bit;
+   else g_RG_GUI_NewsCurrencyMode |= bit;
+   RG_GUI_RefreshNewsPanel();
+   RG_NewsUiChanged();
+}
+void RG_GUI_SelectNewsImpact(int index)
+{
+   if(index<0 || index>3) return;
+   if(index==3)
+   {
+      g_RG_GUI_NewsImpactMode=7;
+      RG_GUI_RefreshNewsPanel();
+   RG_NewsUiChanged();
+      return;
+   }
+   if(g_RG_GUI_NewsImpactMode==7)
+      g_RG_GUI_NewsImpactMode=0;
+   int bit=(1<<index);
+   if((g_RG_GUI_NewsImpactMode & bit)!=0)
+      g_RG_GUI_NewsImpactMode &= ~bit;
+   else
+      g_RG_GUI_NewsImpactMode |= bit;
+   if(g_RG_GUI_NewsImpactMode==0)
+      g_RG_GUI_NewsImpactMode=bit;
+   RG_GUI_RefreshNewsPanel();
+   RG_NewsUiChanged();
+}
+void RG_GUI_FinishNewsSelector()
+{
+   g_RG_GUI_NewsSelector=0;
+   RG_GUI_RefreshNewsPanel();
+   RG_NewsUiChanged();
+}
+void RG_GUI_CycleNewsTimeframe() { g_RG_GUI_NewsTimeframe=1; }
+void RG_GUI_CycleNewsCurrency() { RG_GUI_OpenNewsSelector(2); }
+void RG_GUI_CycleNewsImpact() { RG_GUI_OpenNewsSelector(3); }
+
 string RG_GUI_ST_DisplayLabel(int i,string text)
 {
    string t=text;
@@ -3135,90 +3954,96 @@ void RG_GUI_CreateTabButtons(int x,int y,int w)
 
 void RG_GUI_CreateToolsPanel()
 {
-   if(!g_RG_GUI_ToolsOpen || !g_RG_GUI_PanelExpanded)
-      return;
-
-   int w=RG_GUI_GetPanelWidth();
-   int x=RG_GUI_GetPanelX(w);
-   int y=RG_GUI_GetPanelY();
-   int pw=w;
-   int ph=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(390) : RG_GUI_S(76));
+   if(!g_RG_GUI_ToolsOpen || !g_RG_GUI_PanelExpanded) return;
+   int w=RG_GUI_GetPanelWidth(); int x=RG_GUI_GetPanelX(w); int y=RG_GUI_GetPanelY(); int pw=w;
+   int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(414) : RG_GUI_S(76));
+   int newsH=RG_GUI_S(176);
+   if(!g_RG_GUI_NewsOpen) newsH=RG_GUI_S(42);
+   else if(g_RG_GUI_NewsSelector==2) newsH=RG_GUI_S(286);
+   else if(g_RG_GUI_NewsSelector==3) newsH=RG_GUI_S(226);
+   int ph=specialH+newsH+RG_GUI_S(12);
    int top=y+RG_GUI_HEADER_H+RG_GUI_TAB_H+RG_GUI_S(10);
-
    RG_GUI_CreateRect(RG_PREFIX+"TOOLS_BG",x,top,pw,ph,RG_GUI_BG,RG_GUI_BORDER,RG_GUI_Z_PANEL+1);
-
    string sec=RG_GUI_ST_SpecialTimesSectionName();
-   string secText=(g_RG_GUI_SpecialTimesOpen ? "SPECIAL TIMES   [ - ]" : "SPECIAL TIMES   [ + ]");
-   RG_GUI_CreateButton(sec,secText,x+RG_GUI_S(8),top+RG_GUI_S(8),pw-RG_GUI_S(16),RG_GUI_S(32),
-                       RG_GUI_HEADER_BG,RG_GUI_YELLOW,RG_GUI_Z_BUTTON+800);
+   RG_GUI_CreateButton(sec,g_RG_GUI_SpecialTimesOpen ? "SPECIAL TIMES   [ - ]" : "SPECIAL TIMES   [ + ]",x+RG_GUI_S(8),top+RG_GUI_S(8),pw-RG_GUI_S(16),RG_GUI_S(32),RG_GUI_HEADER_BG,RG_GUI_YELLOW,RG_GUI_Z_BUTTON+800);
    ObjectSetInteger(0,sec,OBJPROP_FONTSIZE,RG_GUI_FS(10));
 
-   if(!g_RG_GUI_SpecialTimesOpen)
-      return;
-
-   // Display controls are panel-level settings; Time and Label remain MT4 Inputs.
-   string dwn=RG_GUI_ST_DisplayWindowName();
-   string lmn=RG_GUI_ST_LabelModeName();
-   bool first=(RG_SpecialTimesGetDisplayWindow()==RG_ST_DISPLAY_FIRST_INDICATOR);
-   bool timeOnly=(RG_SpecialTimesGetLabelMode()==RG_ST_LABEL_TIME_ONLY);
-   int ctrlY=top+RG_GUI_S(70);
-   int ctrlGap=RG_GUI_S(8);
-   int ctrlW=(pw-RG_GUI_S(28)-ctrlGap)/2;
-   RG_GUI_CreateButton(dwn,first ? "WINDOW: 1ST INDICATOR" : "WINDOW: MAIN",
-                       x+RG_GUI_S(10),ctrlY,ctrlW,RG_GUI_S(30),
-                       clrDarkSlateBlue,clrWhite,RG_GUI_Z_BUTTON+800);
-   ObjectSetInteger(0,dwn,OBJPROP_FONTSIZE,RG_GUI_FS(8));
-   RG_GUI_CreateButton(lmn,timeOnly ? "LABEL: TIME ONLY" : "LABEL: TIME + LABEL",
-                       x+RG_GUI_S(10)+ctrlW+ctrlGap,ctrlY,ctrlW,RG_GUI_S(30),
-                       clrDarkGreen,clrWhite,RG_GUI_Z_BUTTON+800);
-   ObjectSetInteger(0,lmn,OBJPROP_FONTSIZE,RG_GUI_FS(8));
-
-   // Two-column layout: 5 events per column.
-   int rowH=RG_GUI_S(48);
-   int rowY=top+RG_GUI_S(112);
-   int colGap=RG_GUI_S(10);
-   int colW=(pw-RG_GUI_S(20)-colGap)/2;
-   if(colW<170) colW=170;
-
-   for(int i=0;i<10;i++)
+   if(g_RG_GUI_SpecialTimesOpen)
    {
-      int col=i/5;
-      int row=i%5;
-      int cx=x+RG_GUI_S(10)+col*(colW+colGap);
-      int yy=rowY+row*rowH;
-
-      string en=RG_GUI_ST_EnableName(i);
-      string tn=RG_GUI_ST_TimeName(i);
-      string ln=RG_GUI_ST_LabelName(i);
-      string cn=RG_GUI_ST_ColorName(i);
-      bool enabled=RG_SpecialTimesGetEnabled(i);
-      color cc=RG_SpecialTimesGetColor(i);
-
-      int onW=RG_GUI_S(38);
-      int timeW=RG_GUI_S(60);
-      int colorW=RG_GUI_S(22);
-      int gap=RG_GUI_S(3);
-      int labelW=RG_GUI_S(58);
-      int maxLabelW=colW-onW-timeW-colorW-(gap*3);
-      if(labelW>maxLabelW) labelW=maxLabelW;
-      if(labelW<48) labelW=48;
-
-      RG_GUI_CreateButton(en,enabled?"ON":"OFF",cx,yy,onW,RG_GUI_S(30),enabled?RG_GUI_GREEN:RG_GUI_HEADER_BG,enabled?clrBlack:RG_GUI_TEXT,RG_GUI_Z_BUTTON+20);
-      RG_GUI_CreateToolEdit(tn,RG_SpecialTimesGetTime(i),cx+onW+gap,yy,timeW,RG_GUI_S(30));
-      ObjectSetInteger(0,tn,OBJPROP_FONTSIZE,RG_GUI_FS(7));
-      RG_GUI_CreateToolEdit(ln,RG_SpecialTimesGetLabel(i),cx+onW+gap+timeW+gap,yy,labelW,RG_GUI_S(30));
-      ObjectSetString(0,ln,OBJPROP_TEXT,RG_GUI_ST_DisplayLabel(i,RG_SpecialTimesGetLabel(i)));
-      ObjectSetInteger(0,ln,OBJPROP_FONTSIZE,RG_GUI_FS(7));
-      RG_GUI_CreateButton(cn," ",cx+colW-colorW,yy,colorW,RG_GUI_S(30),cc,clrBlack,RG_GUI_Z_BUTTON+20);
+      string dwn=RG_GUI_ST_DisplayWindowName(); string lmn=RG_GUI_ST_LabelModeName();
+      bool first=(RG_SpecialTimesGetDisplayWindow()==RG_ST_DISPLAY_FIRST_INDICATOR); bool timeOnly=(RG_SpecialTimesGetLabelMode()==RG_ST_LABEL_TIME_ONLY);
+      int ctrlY=top+RG_GUI_S(70); int ctrlGap=RG_GUI_S(8); int ctrlW=(pw-RG_GUI_S(28)-ctrlGap)/2;
+      RG_GUI_CreateButton(dwn,first ? "WINDOW: 1ST INDICATOR" : "WINDOW: MAIN",x+RG_GUI_S(10),ctrlY,ctrlW,RG_GUI_S(30),clrDarkSlateBlue,clrWhite,RG_GUI_Z_BUTTON+800);
+      ObjectSetInteger(0,dwn,OBJPROP_FONTSIZE,RG_GUI_FS(8));
+      RG_GUI_CreateButton(lmn,timeOnly ? "LABEL: TIME ONLY" : "LABEL: TIME + LABEL",x+RG_GUI_S(10)+ctrlW+ctrlGap,ctrlY,ctrlW,RG_GUI_S(30),clrDarkGreen,clrWhite,RG_GUI_Z_BUTTON+800);
+      ObjectSetInteger(0,lmn,OBJPROP_FONTSIZE,RG_GUI_FS(8));
+      int rowH=RG_GUI_S(48); int rowY=top+RG_GUI_S(112); int colGap=RG_GUI_S(10); int colW=(pw-RG_GUI_S(20)-colGap)/2; if(colW<170) colW=170;
+      for(int i=0;i<10;i++)
+      {
+         int col=i/5; int row=i%5; int cx=x+RG_GUI_S(10)+col*(colW+colGap); int yy=rowY+row*rowH;
+         string en=RG_GUI_ST_EnableName(i); string tn=RG_GUI_ST_TimeName(i); string ln=RG_GUI_ST_LabelName(i); string cn=RG_GUI_ST_ColorName(i);
+         bool enabled=RG_SpecialTimesGetEnabled(i); color cc=RG_SpecialTimesGetColor(i);
+         int onW=RG_GUI_S(38); int timeW=RG_GUI_S(60); int colorW=RG_GUI_S(22); int gap=RG_GUI_S(3); int labelW=RG_GUI_S(58);
+         int maxLabelW=colW-onW-timeW-colorW-(gap*3); if(labelW>maxLabelW) labelW=maxLabelW; if(labelW<48) labelW=48;
+         RG_GUI_CreateButton(en,enabled?"ON":"OFF",cx,yy,onW,RG_GUI_S(30),enabled?RG_GUI_GREEN:RG_GUI_HEADER_BG,enabled?clrBlack:RG_GUI_TEXT,RG_GUI_Z_BUTTON+20);
+         RG_GUI_CreateToolEdit(tn,RG_SpecialTimesGetTime(i),cx+onW+gap,yy,timeW,RG_GUI_S(30)); ObjectSetInteger(0,tn,OBJPROP_FONTSIZE,RG_GUI_FS(7));
+         RG_GUI_CreateToolEdit(ln,RG_SpecialTimesGetLabel(i),cx+onW+gap+timeW+gap,yy,labelW,RG_GUI_S(30)); ObjectSetString(0,ln,OBJPROP_TEXT,RG_GUI_ST_DisplayLabel(i,RG_SpecialTimesGetLabel(i))); ObjectSetInteger(0,ln,OBJPROP_FONTSIZE,RG_GUI_FS(7));
+         RG_GUI_CreateButton(cn," ",cx+colW-colorW,yy,colorW,RG_GUI_S(30),cc,clrBlack,RG_GUI_Z_BUTTON+20);
+      }
+      RG_GUI_CreateText(RG_PREFIX+"TOOLS_HINT","Time / Label are edited from MT4 Inputs. Defaults use LB1 ... LB10.",x+RG_GUI_S(12),top+specialH-RG_GUI_S(16),RG_GUI_MUTED,RG_GUI_FS(8),RG_GUI_Z_TEXT+10);
    }
 
-   RG_GUI_CreateText(RG_PREFIX+"TOOLS_HINT","Time / Label are edited from MT4 Inputs. Defaults use LB1 ... LB10.",x+RG_GUI_S(12),top+ph-RG_GUI_S(16),RG_GUI_MUTED,RG_GUI_FS(8),RG_GUI_Z_TEXT+10);
+   int newsTop=top+specialH+RG_GUI_S(8);
+   string ns=RG_GUI_NewsSectionName();
+   RG_GUI_CreateButton(ns,g_RG_GUI_NewsOpen ? "NEWS   [ - ]" : "NEWS   [ + ]",x+RG_GUI_S(8),newsTop,pw-RG_GUI_S(16),RG_GUI_S(32),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+800);
+   ObjectSetInteger(0,ns,OBJPROP_FONTSIZE,RG_GUI_FS(10));
+   if(!g_RG_GUI_NewsOpen) return;
+
+   int ny=newsTop+RG_GUI_S(42); int gap=RG_GUI_S(6); int bw=(pw-RG_GUI_S(20)-gap)/2; if(bw<100) bw=100;
+   string ne=RG_GUI_NewsEnableName(); string nc=RG_GUI_NewsCurrencyName(); string ni=RG_GUI_NewsImpactName();
+   RG_GUI_CreateButton(ne,g_RG_GUI_NewsEnabled?"NEWS: ON":"NEWS: OFF",x+RG_GUI_S(10),ny,bw,RG_GUI_S(30),g_RG_GUI_NewsEnabled?RG_GUI_GREEN:RG_GUI_HEADER_BG,g_RG_GUI_NewsEnabled?clrBlack:RG_GUI_TEXT,RG_GUI_Z_BUTTON+810);
+   // Timeframe is intentionally not configurable. News always uses CURRENT
+   // and is automatically disabled on H4 and higher.  Use plain text rather
+   // than a button so no hidden Timeframe selector can open or overflow.
+   RG_GUI_CreateButton(RG_GUI_NewsTimeframeName(), "TF: CURRENT", x+RG_GUI_S(10)+bw+gap, ny, bw, RG_GUI_S(30), RG_GUI_HEADER_BG, clrWhite, RG_GUI_Z_BUTTON+810);
+   ObjectSetInteger(0,RG_GUI_NewsTimeframeName(),OBJPROP_FONTSIZE,RG_GUI_FS(9));
+   ny+=RG_GUI_S(36);
+   RG_GUI_CreateButton(nc,RG_GUI_NewsCurrencyText(),x+RG_GUI_S(10),ny,bw,RG_GUI_S(30),clrDarkGreen,clrWhite,RG_GUI_Z_BUTTON+810);
+   RG_GUI_CreateButton(ni,RG_GUI_NewsImpactText(),x+RG_GUI_S(10)+bw+gap,ny,bw,RG_GUI_S(30),clrDarkRed,clrWhite,RG_GUI_Z_BUTTON+810);
+   ny+=RG_GUI_S(42);
+
+   if(g_RG_GUI_NewsSelector==2)
+   {
+      int sg=RG_GUI_S(5); int sw=(pw-RG_GUI_S(20)-2*sg)/3; string curNames[9]={"USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD","ALL"};
+      for(int i=0;i<9;i++){ int col=i%3; int row=i/3; int sx=x+RG_GUI_S(10)+col*(sw+sg); int sy=ny+row*RG_GUI_S(30); bool sel=(i==8 ? g_RG_GUI_NewsCurrencyMode==255 : g_RG_GUI_NewsCurrencyMode!=255 && (g_RG_GUI_NewsCurrencyMode&(1<<i))!=0); RG_GUI_CreateButton(RG_GUI_NewsCurrencyItemName(i),curNames[i],sx,sy,sw,RG_GUI_S(26),sel?RG_GUI_GREEN:RG_GUI_HEADER_BG,sel?clrBlack:RG_GUI_TEXT,RG_GUI_Z_BUTTON+850); }
+      RG_GUI_CreateButton(RG_GUI_NewsDoneName(),"DONE",x+RG_GUI_S(10),ny+2*RG_GUI_S(30),pw-RG_GUI_S(20),RG_GUI_S(26),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+850);
+   }
+   else if(g_RG_GUI_NewsSelector==3)
+   {
+      int sg=RG_GUI_S(5); int sw=(pw-RG_GUI_S(20)-2*sg)/3; string impNames[4]={"HIGH","MED","LOW","ALL"};
+      for(int i=0;i<4;i++){ int col=i%3; int row=i/3; int sx=x+RG_GUI_S(10)+col*(sw+sg); int sy=ny+row*RG_GUI_S(30); bool sel=(i==0?((g_RG_GUI_NewsImpactMode&1)!=0):i==1?((g_RG_GUI_NewsImpactMode&2)!=0):i==2?((g_RG_GUI_NewsImpactMode&4)!=0):g_RG_GUI_NewsImpactMode==7); RG_GUI_CreateButton(RG_GUI_NewsImpactItemName(i),impNames[i],sx,sy,sw,RG_GUI_S(26),sel?RG_GUI_RED:RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+850); }
+      RG_GUI_CreateButton(RG_GUI_NewsDoneName(),"DONE",x+RG_GUI_S(10),ny+2*RG_GUI_S(30),pw-RG_GUI_S(20),RG_GUI_S(26),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+850);
+   }
+
+   // Footer information is shown only in the normal News state.
+   // Selector states use the full News area for the options and DONE button.
+   if(g_RG_GUI_NewsSelector==0)
+   {
+      int infoY=newsTop+RG_GUI_S(116);
+      RG_GUI_CreateText(RG_GUI_NewsSourceName(),"SOURCE: FOREXFACTORY",x+RG_GUI_S(12),infoY,RG_GUI_MUTED,RG_GUI_FS(7),RG_GUI_Z_TEXT+20);
+      RG_GUI_CreateText(RG_GUI_NewsStatusName(),"TIME + CURRENCY + IMPACT | SERVER TIME",x+RG_GUI_S(12),infoY+RG_GUI_S(14),RG_GUI_MUTED,RG_GUI_FS(6),RG_GUI_Z_TEXT+20);
+      RG_GUI_CreateText(RG_GUI_NEWS_PREFIX+"FUTURE","TODAY NEWS ONLY",x+RG_GUI_S(12),infoY+RG_GUI_S(28),RG_GUI_MUTED,RG_GUI_FS(6),RG_GUI_Z_TEXT+20);
+   }
 }
 
 void RG_GUI_ToggleSpecialTimes()
 {
    g_RG_GUI_SpecialTimesOpen=!g_RG_GUI_SpecialTimesOpen;
    RG_CreatePanel();
+
+   // Rebuilds delete chart objects, including cached News labels.
+   // Redraw News immediately after the Special Times dropdown changes.
+   RG_NewsUiChanged();
 }
 
 void RG_GUI_ToggleTools()
@@ -3235,8 +4060,8 @@ void RG_GUI_UpdateToolsPanel()
    if(ObjectFind(0,sec)>=0)
       ObjectSetString(0,sec,OBJPROP_TEXT,g_RG_GUI_SpecialTimesOpen ? "SPECIAL TIMES   [ - ]" : "SPECIAL TIMES   [ + ]");
 
-   if(!g_RG_GUI_SpecialTimesOpen) return;
-
+   if(g_RG_GUI_SpecialTimesOpen)
+   {
    string dwn=RG_GUI_ST_DisplayWindowName();
    string lmn=RG_GUI_ST_LabelModeName();
    if(ObjectFind(0,dwn)>=0)
@@ -3270,6 +4095,21 @@ void RG_GUI_UpdateToolsPanel()
       if(ObjectFind(0,cn)>=0)
          ObjectSetInteger(0,cn,OBJPROP_BGCOLOR,RG_SpecialTimesGetColor(i));
    }
+
+   }
+
+   // News controls are display-only until the News engine is connected.
+   if(ObjectFind(0,RG_GUI_NewsEnableName())>=0)
+   {
+      bool on=g_RG_GUI_NewsEnabled;
+      ObjectSetString(0,RG_GUI_NewsEnableName(),OBJPROP_TEXT,on?"NEWS: ON":"NEWS: OFF");
+      ObjectSetInteger(0,RG_GUI_NewsEnableName(),OBJPROP_BGCOLOR,on?RG_GUI_GREEN:RG_GUI_HEADER_BG);
+      ObjectSetInteger(0,RG_GUI_NewsEnableName(),OBJPROP_COLOR,on?clrBlack:RG_GUI_TEXT);
+   }
+   if(ObjectFind(0,RG_GUI_NewsCurrencyName())>=0)
+      ObjectSetString(0,RG_GUI_NewsCurrencyName(),OBJPROP_TEXT,RG_GUI_NewsCurrencyText());
+   if(ObjectFind(0,RG_GUI_NewsImpactName())>=0)
+      ObjectSetString(0,RG_GUI_NewsImpactName(),OBJPROP_TEXT,RG_GUI_NewsImpactText());
 }
 
 //====================================================
@@ -3376,7 +4216,13 @@ bool RG_CreatePanel()
 
    if(g_RG_GUI_ToolsOpen)
    {
-      int toolsH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(390) : RG_GUI_S(76));
+      int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(414) : RG_GUI_S(76));
+      int newsH=RG_GUI_S(176);
+      if(!g_RG_GUI_NewsOpen) newsH=RG_GUI_S(42);
+      
+      else if(g_RG_GUI_NewsSelector==2) newsH=RG_GUI_S(286);
+      else if(g_RG_GUI_NewsSelector==3) newsH=RG_GUI_S(226);
+      int toolsH=specialH+newsH+RG_GUI_S(12);
       L.panelH=RG_GUI_HEADER_H+RG_GUI_TAB_H+RG_GUI_S(4)+toolsH+RG_GUI_S(8);
    }
 
@@ -3899,6 +4745,11 @@ bool RG_CreatePanel()
    RG_UpdateGUI();
    RG_UpdateFooter();
 
+   // News objects are intentionally excluded from RG_DeletePanel(), so
+   // switching Trade/Tools does not erase chart news.
+   if(g_RG_GUI_NewsEnabled && g_RG_NewsDrawDirty)
+      RG_NewsDraw();
+
    ChartRedraw();
 
    return(true);
@@ -4214,6 +5065,11 @@ void RG_GUI_MovePanelObjects(int dx,int dy)
       // Special Times are chart-anchored to the bottom edge and must
       // never move with the draggable RiskGuard panel.
       if(StringFind(name,"RG_ST_",0)==0)
+         continue;
+
+      // News markers are chart-timeline objects, not panel objects.
+      // Never move them when the RiskGuard panel is dragged.
+      if(StringFind(name,RG_NEWS_OBJ_PREFIX,0)==0)
          continue;
 
       if(ObjectFind(0,name)<0)

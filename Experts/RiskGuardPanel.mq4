@@ -4,6 +4,7 @@
 // RiskGuard MT4
 // Main Expert Advisor
 // Stage 3: Multi-Symbol Positions
+// News: Today Only / Server Time
 //
 // PRE-TRADE FLOW
 //
@@ -749,6 +750,7 @@ void OnTimer()
    }
 
    RG_RuntimeSyncInputDefaults();
+   RG_NewsEngineUpdate();
    RG_ProcessPositionManager();
 
    RG_UpdateGUI();
@@ -941,6 +943,50 @@ void OnChartEvent(
       {
          RG_GUI_ToggleSpecialTimes();
          return;
+      }
+      //=================================================
+      // NEWS CONTROLS
+      //=================================================
+      if(sparam==RG_GUI_NewsSectionName())
+      {
+         RG_GUI_ToggleNewsPanel();
+         return;
+      }
+      if(sparam==RG_GUI_NewsEnableName())
+      {
+         RG_GUI_ToggleNews();
+         return;
+      }
+      if(sparam==RG_GUI_NewsCurrencyName())
+      {
+         RG_GUI_CycleNewsCurrency();
+         return;
+      }
+      if(sparam==RG_GUI_NewsImpactName())
+      {
+         RG_GUI_CycleNewsImpact();
+         return;
+      }
+      if(sparam==RG_GUI_NewsDoneName())
+      {
+         RG_GUI_FinishNewsSelector();
+         return;
+      }
+      for(int nci=0;nci<9;nci++)
+      {
+         if(sparam==RG_GUI_NewsCurrencyItemName(nci))
+         {
+            RG_GUI_ToggleNewsCurrency(nci);
+            return;
+         }
+      }
+      for(int nii=0;nii<4;nii++)
+      {
+         if(sparam==RG_GUI_NewsImpactItemName(nii))
+         {
+            RG_GUI_SelectNewsImpact(nii);
+            return;
+         }
       }
       if(sparam==RG_GUI_ST_DisplayWindowName())
       {
