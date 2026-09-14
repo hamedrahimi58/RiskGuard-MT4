@@ -61,6 +61,7 @@
 #define RG_NEWS_MAX_ROWS 2
 #define RG_NEWS_REFRESH_SEC 300
 #define RG_GUI_FONT_NEWS "Times New Roman"
+#define RG_GUI_FONT "Times New Roman"
 #define RG_NEWS_OBJ_PREFIX RG_GUI_NEWS_PREFIX+"EV_"
 
 struct RG_NewsEvent
@@ -89,6 +90,527 @@ double g_RG_NewsLastPriceMax=0.0;
 double g_RG_NewsLastPriceMin=0.0;
 int g_RG_NewsLastDayKey=-1;
 
+//====================================================
+// MARKET SESSIONS - RG-067-054
+//====================================================
+#define RG_GUI_SESSION_OBJECT_PREFIX "RGSESSION_"
+
+bool g_RG_GUI_SessionsEnabled=true;
+bool g_RG_GUI_SessionsCurrent=true;
+int  g_RG_GUI_SessionsFuture=3;
+bool g_RG_GUI_SessionsLabels=true;
+bool g_RG_GUI_SessionsOpen=true;
+int  g_RG_GUI_SessionsLastMinute=-1;
+
+struct RGSessionOccurrence
+{
+   string name;
+   datetime startTime;
+   datetime endTime;
+   color lineColor;
+   bool current;
+};
+
+void RG_GUI_DeleteSessionObjects()
+{
+   for(int i=ObjectsTotal()-1;i>=0;i--)
+   {
+      string name=ObjectName(i);
+      if(StringFind(name,RG_GUI_SESSION_OBJECT_PREFIX,0)==0)
+         ObjectDelete(0,name);
+   }
+}
+
+string RG_GUI_SessionName(int index)
+{
+   if(index==0) return("Sydney");
+   if(index==1) return("Tokyo");
+   if(index==2) return("London");
+   return("New York");
+}
+
+color RG_GUI_SessionColor(int index)
+{
+   if(index==0) return(C'0,120,210');
+   if(index==1) return(C'50,170,70');
+   if(index==2) return(C'220,150,0');
+   return(C'175,75,190');
+}
+
+datetime RG_GUI_ServerMidnight(datetime serverTime)
+{
+   MqlDateTime dt; ZeroMemory(dt);
+   if(!TimeToStruct(serverTime,dt)) return(0);
+   dt.hour=0; dt.min=0; dt.sec=0;
+   return(StructToTime(dt));
+}
+
+datetime RG_GUI_NthSunday(int year,int month,int nth)
+{
+   MqlDateTime dt; ZeroMemory(dt);
+   dt.year=year; dt.mon=month; dt.day=1;
+   datetime first=StructToTime(dt);
+   int dow=TimeDayOfWeek(first);
+   dt.day=1+(7-dow)%7+(nth-1)*7;
+   return(StructToTime(dt));
+}
+
+datetime RG_GUI_LastSunday(int year,int month)
+{
+   MqlDateTime dt; ZeroMemory(dt);
+   dt.year=year; dt.mon=month+1; dt.day=1;
+   datetime firstNext=StructToTime(dt);
+   datetime lastDay=firstNext-86400;
+   return(lastDay-TimeDayOfWeek(lastDay)*86400);
+}
+
+bool RG_GUI_LondonDST(datetime utcDate)
+{
+   MqlDateTime dt; ZeroMemory(dt); TimeToStruct(utcDate,dt);
+   datetime a=RG_GUI_LastSunday(dt.year,3);
+   datetime b=RG_GUI_LastSunday(dt.year,10);
+   return(utcDate>=a && utcDate<b);
+}
+
+bool RG_GUI_NewYorkDST(datetime utcDate)
+{
+   MqlDateTime dt; ZeroMemory(dt); TimeToStruct(utcDate,dt);
+   datetime a=RG_GUI_NthSunday(dt.year,3,2);
+   datetime b=RG_GUI_NthSunday(dt.year,11,1);
+   return(utcDate>=a && utcDate<b);
+}
+
+bool RG_GUI_SydneyDST(datetime utcDate)
+{
+   MqlDateTime dt; ZeroMemory(dt); TimeToStruct(utcDate,dt);
+   datetime currentStart=RG_GUI_NthSunday(dt.year,10,1);
+   datetime currentFinish=RG_GUI_NthSunday(dt.year,4,1);
+   datetime previousStart=RG_GUI_NthSunday(dt.year-1,10,1);
+   if(utcDate>=currentStart) return(true);
+   return(utcDate>=previousStart && utcDate<currentFinish);
+}
+
+int RG_GUI_SessionStartUTC(int index,datetime utcDate)
+{
+   if(index==0) return(RG_GUI_SydneyDST(utcDate)?22:21);
+   if(index==1) return(0);
+   if(index==2) return(RG_GUI_LondonDST(utcDate)?7:8);
+   return(RG_GUI_NewYorkDST(utcDate)?12:13);
+}
+
+#define RG_GUI_SESSION_BROKER_OFFSET_GV "RG_GUI_SESSION_BROKER_UTC_OFFSET"
+
+int RG_GUI_GetSessionBrokerOffset()
+{
+   // TimeCurrent() stops at the last broker tick during Saturday/Sunday.
+   // Therefore TimeCurrent()-TimeGMT() is NOT valid on the weekend.
+   // Store the real broker offset on a weekday and reuse it while the market
+   // is closed.  A GMT+3 fallback is used only on the very first weekend run.
+   int serverDow=TimeDayOfWeek(TimeCurrent());
+   if(serverDow>=1 && serverDow<=5)
+   {
+      int off=(int)MathRound((TimeCurrent()-TimeGMT())/3600.0);
+      if(off>=-14 && off<=14)
+      {
+         GlobalVariableSet(RG_GUI_SESSION_BROKER_OFFSET_GV,(double)off);
+         return(off);
+      }
+   }
+
+   if(GlobalVariableCheck(RG_GUI_SESSION_BROKER_OFFSET_GV))
+   {
+      int saved=(int)MathRound(GlobalVariableGet(RG_GUI_SESSION_BROKER_OFFSET_GV));
+      if(saved>=-14 && saved<=14) return(saved);
+   }
+
+   return(3);
+}
+
+datetime RG_GUI_GetSessionReferenceNow()
+{
+   // AUTHORITATIVE SESSION CLOCK:
+   // During the trading week the value shown by MT4 as Server Time is
+   // TimeCurrent().  Never replace it with PC/local time while the market
+   // is open.  Doing so can move the session engine into another hour/day
+   // and make an actually CURRENT session disappear.
+   datetime serverNow=TimeCurrent();
+   int dow=TimeDayOfWeek(serverNow);
+
+   if(dow>=1 && dow<=5)
+   {
+      // Refresh the stored broker UTC offset from the same authoritative
+      // server clock. This offset is used only to determine DST dates.
+      RG_GUI_GetSessionBrokerOffset();
+      return(serverNow);
+   }
+
+   // Weekend: TimeCurrent() can remain frozen at Friday's last tick.
+   // Here, and only here, advance the broker wall clock using PC time and
+   // the last known broker UTC offset.
+   datetime localNow=TimeLocal();
+   int localOffset=TimeGMTOffset();
+   int brokerOffset=RG_GUI_GetSessionBrokerOffset();
+   return(localNow-localOffset+brokerOffset*3600);
+}
+
+datetime RG_GUI_SessionStartForDate(datetime serverMidnight,int sessionIndex,int dayShift)
+{
+   // Build the Session start directly on the BROKER calendar clock.
+   // The previous implementation converted broker-midnight -> UTC-midnight
+   // and then converted back. That is fragile in MT4 because datetime values
+   // are timezone-neutral while TimeCurrent/TimeToStruct are presented in the
+   // terminal's server clock. At the London/New York boundary this could make
+   // a valid current session look like a future occurrence.
+   //
+   // We therefore keep the requested broker date as the anchor, determine the
+   // UTC calendar date only for DST evaluation, and then add the broker offset
+   // to the UTC session hour. The resulting datetime is guaranteed to use the
+   // requested broker calendar date (or the adjacent date for Sydney when its
+   // UTC start converts past midnight).
+   int brokerOffset=RG_GUI_GetSessionBrokerOffset();
+   datetime wantedServerMidnight=serverMidnight+dayShift*86400;
+
+   // Calendar date used to evaluate DST. Offset conversion is only used to
+   // select the correct UTC date; no UTC-midnight reconstruction is required.
+   datetime utcProbe=wantedServerMidnight-brokerOffset*3600;
+   int utcSessionHour=RG_GUI_SessionStartUTC(sessionIndex,utcProbe);
+
+   int serverHour=utcSessionHour+brokerOffset;
+   int dateShift=0;
+
+   while(serverHour>=24)
+   {
+      serverHour-=24;
+      dateShift++;
+   }
+   while(serverHour<0)
+   {
+      serverHour+=24;
+      dateShift--;
+   }
+
+   return(wantedServerMidnight+dateShift*86400+serverHour*3600);
+}
+
+int RG_GUI_SessionDurationHours(int index) { return(9); }
+
+void RG_GUI_AddSessionOccurrence(RGSessionOccurrence &items[],int &count,string name,datetime startTime,datetime endTime,color lineColor,bool current)
+{
+   if(count>=32) return;
+   items[count].name=name; items[count].startTime=startTime; items[count].endTime=endTime;
+   items[count].lineColor=lineColor; items[count].current=current; count++;
+}
+
+void RG_GUI_SortSessionOccurrences(RGSessionOccurrence &items[],int count)
+{
+   for(int i=1;i<count;i++)
+   {
+      RGSessionOccurrence key=items[i];
+      int j=i-1;
+      while(j>=0 && items[j].startTime>key.startTime)
+      {
+         items[j+1]=items[j];
+         j--;
+      }
+      items[j+1]=key;
+   }
+}
+
+int RG_GUI_CurrentTFSeconds()
+{
+   int tf=Period();
+   if(tf==PERIOD_M1)  return(60);
+   if(tf==PERIOD_M5)  return(300);
+   if(tf==PERIOD_M15) return(900);
+   if(tf==PERIOD_M30) return(1800);
+   if(tf==PERIOD_H1)  return(3600);
+   if(tf==PERIOD_H4)  return(14400);
+   return(0);
+}
+
+bool RG_GUI_GetSessionCandleRange(datetime startTime,datetime endTime,double &sessionHigh,double &sessionLow)
+{
+   sessionHigh=0.0; sessionLow=0.0;
+   int tf=Period();
+   int tfSec=RG_GUI_CurrentTFSeconds();
+   if(tfSec<=0) return(false);
+
+   int firstVisible=WindowFirstVisibleBar();
+   int visibleBars=WindowBarsPerChart();
+   if(firstVisible<0 || visibleBars<=0) return(false);
+
+   int lastVisible=firstVisible-visibleBars+1;
+   if(lastVisible<0) lastVisible=0;
+
+   bool found=false;
+   int bars=iBars(Symbol(),tf);
+   if(bars<=0) return(false);
+
+   int from=firstVisible;
+   if(from>=bars) from=bars-1;
+   int to=lastVisible;
+   if(to<0) to=0;
+
+   for(int shift=from;shift>=to;shift--)
+   {
+      datetime bt=iTime(Symbol(),tf,shift);
+      if(bt<=0) continue;
+      datetime be=bt+tfSec;
+
+      // Include a chart candle when it overlaps the session interval.
+      if(be<=startTime || bt>=endTime) continue;
+
+      double hi=iHigh(Symbol(),tf,shift);
+      double lo=iLow(Symbol(),tf,shift);
+      if(hi<=0.0 || lo<=0.0) continue;
+
+      if(!found)
+      {
+         sessionHigh=hi;
+         sessionLow=lo;
+         found=true;
+      }
+      else
+      {
+         if(hi>sessionHigh) sessionHigh=hi;
+         if(lo<sessionLow) sessionLow=lo;
+      }
+   }
+   return(found && sessionHigh>=sessionLow);
+}
+
+bool RG_GUI_GetPreviousSessionRange(datetime serverMidnight,int sessionIndex,double &sessionHigh,double &sessionLow)
+{
+   sessionHigh=0.0;
+   sessionLow=0.0;
+
+   // Use the latest completed occurrence of the same session that is
+   // actually represented by the currently visible chart.
+   for(int dayShift=-1;dayShift>=-14;dayShift--)
+   {
+      datetime st=RG_GUI_SessionStartForDate(serverMidnight,sessionIndex,dayShift);
+      datetime en=st+RG_GUI_SessionDurationHours(sessionIndex)*3600;
+      if(RG_GUI_GetSessionCandleRange(st,en,sessionHigh,sessionLow))
+         return(true);
+   }
+   return(false);
+}
+
+void RG_GUI_CreateSessionLine(string name,datetime t1,double p1,datetime t2,double p2,color lineColor)
+{
+   if(ObjectFind(0,name)>=0) ObjectDelete(0,name);
+   if(!ObjectCreate(0,name,OBJ_TREND,0,t1,p1,t2,p2)) return;
+   ObjectSetInteger(0,name,OBJPROP_COLOR,lineColor);
+   ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_DOT);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
+   ObjectSetInteger(0,name,OBJPROP_RAY,false);
+   ObjectSetInteger(0,name,OBJPROP_BACK,true);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+   ObjectSetInteger(0,name,OBJPROP_ZORDER,0);
+}
+
+void RG_GUI_CreateSessionFrame(string base,datetime t1,double top,datetime t2,double bottom,color lineColor)
+{
+   // Four independent dotted lines are used instead of OBJ_RECTANGLE.
+   // This guarantees that the session has NO filled background.
+   RG_GUI_CreateSessionLine(base+"TOP",   t1,top,   t2,top,   lineColor);
+   RG_GUI_CreateSessionLine(base+"RIGHT", t2,top,   t2,bottom,lineColor);
+   RG_GUI_CreateSessionLine(base+"BOTTOM",t2,bottom,t1,bottom,lineColor);
+   RG_GUI_CreateSessionLine(base+"LEFT",  t1,bottom,t1,top,   lineColor);
+}
+
+void RG_GUI_CreateSessionLabel(string name,string text,datetime when,double price,color textColor)
+{
+   if(ObjectFind(0,name)>=0) ObjectDelete(0,name);
+   if(!ObjectCreate(0,name,OBJ_TEXT,0,when,price)) return;
+   ObjectSetText(name,text,8,RG_GUI_FONT_NEWS,textColor);
+   ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_BACK,true);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+}
+
+
+bool RG_GUI_GetLast120M15Range(double &rangeHigh,double &rangeLow)
+{
+   rangeHigh=0.0;
+   rangeLow=0.0;
+
+   const int count=120;
+   const int startShift=1; // completed M15 candles only
+   int bars=iBars(Symbol(),PERIOD_M15);
+   if(bars<=startShift) return(false);
+
+   int available=bars-startShift;
+   int useCount=available;
+   if(useCount>count) useCount=count;
+   if(useCount<=0) return(false);
+
+   int hiShift=iHighest(Symbol(),PERIOD_M15,MODE_HIGH,useCount,startShift);
+   int loShift=iLowest(Symbol(),PERIOD_M15,MODE_LOW,useCount,startShift);
+   if(hiShift<0 || loShift<0) return(false);
+
+   double hi=iHigh(Symbol(),PERIOD_M15,hiShift);
+   double lo=iLow(Symbol(),PERIOD_M15,loShift);
+   if(hi<=0.0 || lo<=0.0 || hi<lo) return(false);
+
+   rangeHigh=hi;
+   rangeLow=lo;
+   return(true);
+}
+
+void RG_GUI_DrawMarketSessions()
+{
+   RG_GUI_DeleteSessionObjects();
+   if(!g_RG_GUI_SessionsEnabled) return;
+
+   int tf=Period();
+   if(tf!=PERIOD_M1 && tf!=PERIOD_M5 && tf!=PERIOD_M15 && tf!=PERIOD_M30 &&
+      tf!=PERIOD_H1 && tf!=PERIOD_H4) return;
+
+   datetime now=RG_GUI_GetSessionReferenceNow();
+   int nowDow=TimeDayOfWeek(now);
+
+   // Saturday/Sunday are a chart gap, not trading-session days. Do not place
+   // Sydney/Tokyo/London/New York frames into the empty weekend area. On
+   // Monday the broker wall clock above automatically advances even if the
+   // first Monday tick has not arrived yet.
+   if(nowDow==0 || nowDow==6) return;
+
+   datetime midnight=RG_GUI_ServerMidnight(now);
+   RGSessionOccurrence all[32]; int allCount=0;
+
+   // Build occurrences around the current BROKER date, then sort by their
+   // actual server time.  This guarantees Sydney -> Tokyo -> London -> New York
+   // order instead of allowing a cross-midnight session to jump to the front.
+   for(int day=-2;day<=3;day++)
+      for(int si=0;si<4;si++)
+      {
+         datetime st=RG_GUI_SessionStartForDate(midnight,si,day);
+         if(st<=0) continue;
+
+         // Never render an occurrence whose server-calendar start is on the
+         // weekend. This is the key difference from a normal 7-day calendar:
+         // the visible chart has a Friday->Monday gap, so the session engine
+         // must not manufacture boxes inside that gap.
+         int stDow=TimeDayOfWeek(st);
+         if(stDow==0 || stDow==6) continue;
+
+         datetime en=st+RG_GUI_SessionDurationHours(si)*3600;
+         bool current=(st<=now && now<en);
+         bool future=(st>now);
+         if(!current && !future) continue;
+         RG_GUI_AddSessionOccurrence(all,allCount,RG_GUI_SessionName(si),st,en,RG_GUI_SessionColor(si),current);
+      }
+   RG_GUI_SortSessionOccurrences(all,allCount);
+
+   RGSessionOccurrence selected[16]; int selectedCount=0, futureCount=0;
+
+   // CURRENT is independent for every session.  Do not stop after finding
+   // one active session: London and New York can legitimately overlap.
+   // Build the current set first, then add the requested future sessions.
+   if(g_RG_GUI_SessionsCurrent)
+   {
+      for(int i=0;i<allCount && selectedCount<16;i++)
+      {
+         if(!all[i].current) continue;
+
+         bool duplicate=false;
+         for(int j=0;j<selectedCount;j++)
+         {
+            if(selected[j].name==all[i].name &&
+               selected[j].startTime==all[i].startTime)
+            {
+               duplicate=true;
+               break;
+            }
+         }
+         if(!duplicate)
+            selected[selectedCount++]=all[i];
+      }
+   }
+
+   for(int i=0;i<allCount && selectedCount<16;i++)
+   {
+      if(all[i].startTime<=now) continue;
+      if(futureCount>=g_RG_GUI_SessionsFuture) continue;
+
+      bool duplicate=false;
+      for(int j=0;j<selectedCount;j++)
+      {
+         if(selected[j].name==all[i].name &&
+            selected[j].startTime==all[i].startTime)
+         {
+            duplicate=true;
+            break;
+         }
+      }
+      if(duplicate) continue;
+
+      selected[selectedCount++]=all[i];
+      futureCount++;
+   }
+
+   // Session height is based on the high-low range of the latest 120
+   // COMPLETED M15 candles of the current symbol.  The same height is used
+   // for every session so the boxes remain visually comparable.
+   double rangeHigh=0.0;
+   double rangeLow=0.0;
+   if(!RG_GUI_GetLast120M15Range(rangeHigh,rangeLow)) return;
+
+   double sessionRange=rangeHigh-rangeLow;
+   if(sessionRange<=0.0) return;
+
+   // Keep the same centered presentation used by the previous stable version,
+   // but derive the height from the requested M15/120-candle market range.
+   double chartTop=WindowPriceMax();
+   double chartBottom=WindowPriceMin();
+   if(chartTop<=chartBottom) return;
+   double center=(chartTop+chartBottom)/2.0;
+   double halfHeight=sessionRange/2.0;
+
+   for(int i=0;i<selectedCount;i++)
+   {
+      RGSessionOccurrence q=selected[i];
+      int si=3;
+      if(q.name=="Sydney") si=0;
+      else if(q.name=="Tokyo") si=1;
+      else if(q.name=="London") si=2;
+
+      // All four sessions use exactly the same height.
+      double top=center+halfHeight;
+      double bottom=center-halfHeight;
+
+      string base=RG_GUI_SESSION_OBJECT_PREFIX+IntegerToString(i)+"_";
+      RG_GUI_CreateSessionFrame(base+"FRAME",q.startTime,top,q.endTime,bottom,q.lineColor);
+
+      if(g_RG_GUI_SessionsLabels)
+      {
+         string cap=q.name;
+         if(q.current) cap+="  NOW";
+         else cap+="  NEXT";
+         RG_GUI_CreateSessionLabel(base+"LABEL",cap,q.startTime,top,q.lineColor);
+      }
+   }
+   ChartRedraw();
+}
+
+void RG_GUI_UpdateSessionVisualization()
+{
+   static int lastPeriod=-1;
+   datetime now=RG_GUI_GetSessionReferenceNow();
+   int minute=(int)(now/60);
+   if(minute==g_RG_GUI_SessionsLastMinute && lastPeriod==Period()) return;
+   g_RG_GUI_SessionsLastMinute=minute;
+   lastPeriod=Period();
+   RG_GUI_DrawMarketSessions();
+}
+
+string RG_GUI_SessionControlName(string key) { return(RG_PREFIX+"SESSION_"+key); }
+
 string RG_NewsObjName(int i)
 {
    return(RG_NEWS_OBJ_PREFIX+"TXT_"+IntegerToString(i));
@@ -106,11 +628,14 @@ string RG_NewsLineName(int i)
 
 void RG_NewsDeleteObjects()
 {
-   for(int i=0;i<RG_NEWS_MAX_DISPLAY;i++)
+   // Delete every News chart object by prefix, not only the currently
+   // allocated display indexes. This also clears stale objects left by
+   // a previous EA instance/reinitialization.
+   for(int i=ObjectsTotal()-1;i>=0;i--)
    {
-      ObjectDelete(0,RG_NewsObjName(i));
-      ObjectDelete(0,RG_NewsPinName(i));
-      ObjectDelete(0,RG_NewsLineName(i));
+      string name=ObjectName(i);
+      if(StringFind(name,RG_NEWS_OBJ_PREFIX,0)==0)
+         ObjectDelete(0,name);
    }
 }
 bool RG_NewsCurrencyAllowed(string cur)
@@ -621,7 +1146,6 @@ void RG_NewsUiChanged()
 
 #define RG_GUI_EDIT_BG         clrBlack
 #define RG_GUI_EDIT_TEXT       clrWhite
-#define RG_GUI_FONT            "Times New Roman"
 
 //====================================================
 // Responsive UI scale
@@ -3541,6 +4065,128 @@ void RG_GUI_TogglePositions()
 }
 
 //====================================================
+// TOOLS / MARKET SESSIONS
+//====================================================
+
+void RG_GUI_CreateToolsSessionsPanel(int x,int y,int w)
+{
+   int cx=x+RG_GUI_S(10);
+   int cw=w-RG_GUI_S(20);
+   int headerH=RG_GUI_S(32);
+
+   string header=RG_GUI_SessionControlName("SECTION");
+   RG_GUI_CreateButton(
+      header,
+      g_RG_GUI_SessionsOpen ? "MARKET SESSIONS   [ - ]" : "MARKET SESSIONS   [ + ]",
+      x+RG_GUI_S(8),y,
+      w-RG_GUI_S(16),headerH,
+      RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+820
+   );
+   ObjectSetInteger(0,header,OBJPROP_FONTSIZE,RG_GUI_FS(9));
+
+   if(!g_RG_GUI_SessionsOpen)
+      return;
+
+   int yy=y+RG_GUI_S(38);
+   int gap=RG_GUI_S(6);
+   int colGap=RG_GUI_S(8);
+   int colW=(cw-colGap)/2;
+   int rowH=RG_GUI_S(28);
+
+   string names[4]={"Sessions","Current","Next Sessions","Labels"};
+   string keys[4]={"ON_VALUE","CURRENT_VALUE","FUTURE_VALUE","LABELS_VALUE"};
+   string vals[4];
+   vals[0]=g_RG_GUI_SessionsEnabled ? "ON" : "OFF";
+   vals[1]=g_RG_GUI_SessionsCurrent ? "ON" : "OFF";
+   vals[2]=IntegerToString(g_RG_GUI_SessionsFuture);
+   vals[3]=g_RG_GUI_SessionsLabels ? "ON" : "OFF";
+
+   for(int i=0;i<4;i++)
+   {
+      int col=i%2;
+      int row=i/2;
+      int cx2=cx+col*(colW+colGap);
+      int ry=yy+row*(rowH+gap);
+
+      RG_GUI_CreateText(
+         RG_GUI_SessionControlName(keys[i])+"_LABEL",
+         names[i],
+         cx2,ry+RG_GUI_S(18),
+         RG_GUI_MUTED,RG_GUI_FS(8),RG_GUI_Z_TEXT
+      );
+
+      color bg=RG_GUI_HEADER_BG;
+      color fg=RG_GUI_TEXT;
+      if((i==0 && g_RG_GUI_SessionsEnabled) ||
+         (i==1 && g_RG_GUI_SessionsCurrent) ||
+         (i==3 && g_RG_GUI_SessionsLabels))
+      {
+         bg=RG_GUI_GREEN;
+         fg=clrBlack;
+      }
+
+      RG_GUI_CreateButton(
+         RG_GUI_SessionControlName(keys[i]),vals[i],
+         cx2+colW-RG_GUI_S(60),ry,
+         RG_GUI_S(60),rowH,
+         bg,fg,RG_GUI_Z_BUTTON+830
+      );
+      ObjectSetInteger(0,RG_GUI_SessionControlName(keys[i]),OBJPROP_FONTSIZE,RG_GUI_FS(8));
+   }
+
+   RG_GUI_CreateText(
+      RG_GUI_SessionControlName("INFO"),
+      "Sydney | Tokyo | London | New York  |  Broker Server Time",
+      cx,yy+2*(rowH+gap)+RG_GUI_S(2),
+      RG_GUI_MUTED,RG_GUI_FS(6),RG_GUI_Z_TEXT
+   );
+}
+
+void RG_GUI_ToggleSessionsSection()
+{
+   g_RG_GUI_SessionsOpen=!g_RG_GUI_SessionsOpen;
+   RG_CreatePanel();
+}
+
+void RG_GUI_ToggleSessionsEnabled()
+{
+   g_RG_GUI_SessionsEnabled=!g_RG_GUI_SessionsEnabled;
+   if(!g_RG_GUI_SessionsEnabled)
+      RG_GUI_DeleteSessionObjects();
+   else
+      RG_GUI_DrawMarketSessions();
+   RG_GUI_UpdateToolsPanel();
+   ChartRedraw();
+}
+
+void RG_GUI_ToggleSessionsCurrent()
+{
+   g_RG_GUI_SessionsCurrent=!g_RG_GUI_SessionsCurrent;
+   RG_GUI_DrawMarketSessions();
+   RG_GUI_UpdateToolsPanel();
+   ChartRedraw();
+}
+
+void RG_GUI_CycleSessionsFuture()
+{
+   g_RG_GUI_SessionsFuture++;
+   if(g_RG_GUI_SessionsFuture>5)
+      g_RG_GUI_SessionsFuture=0;
+   RG_GUI_DrawMarketSessions();
+   RG_GUI_UpdateToolsPanel();
+   ChartRedraw();
+}
+
+void RG_GUI_ToggleSessionsLabels()
+{
+   g_RG_GUI_SessionsLabels=!g_RG_GUI_SessionsLabels;
+   RG_GUI_DrawMarketSessions();
+   RG_GUI_UpdateToolsPanel();
+   ChartRedraw();
+}
+
+
+//====================================================
 // TOOLS / SPECIAL TIMES
 //====================================================
 
@@ -3690,7 +4336,8 @@ void RG_GUI_RefreshNewsPanel()
    int x=RG_GUI_GetPanelX(w);
    int y=RG_GUI_GetPanelY();
    int pw=w;
-   int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(414) : RG_GUI_S(76));
+   int sessionH=(g_RG_GUI_SessionsOpen ? RG_GUI_S(138) : RG_GUI_S(44));
+   int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(360) : RG_GUI_S(48));
    int newsH=RG_GUI_S(176);
    if(!g_RG_GUI_NewsOpen)
       newsH=RG_GUI_S(42);
@@ -3699,7 +4346,7 @@ void RG_GUI_RefreshNewsPanel()
    else if(g_RG_GUI_NewsSelector==3)
       newsH=RG_GUI_S(226);
 
-   int ph=specialH+newsH+RG_GUI_S(12);
+   int ph=sessionH+specialH+newsH+RG_GUI_S(20);
    int top=y+RG_GUI_HEADER_H+RG_GUI_TAB_H+RG_GUI_S(10);
 
    // Keep the outer panel synchronized with the expanded selector.
@@ -3720,7 +4367,7 @@ void RG_GUI_RefreshNewsPanel()
       ObjectSetInteger(0,bg,OBJPROP_YSIZE,ph);
    }
 
-   int newsTop=top+specialH+RG_GUI_S(8);
+   int newsTop=top+sessionH+specialH+RG_GUI_S(8);
    string ns=RG_GUI_NewsSectionName();
    if(ObjectFind(0,ns)<0)
       RG_GUI_CreateButton(ns,g_RG_GUI_NewsOpen ? "NEWS   [ - ]" : "NEWS   [ + ]",x+RG_GUI_S(8),newsTop,pw-RG_GUI_S(16),RG_GUI_S(32),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+800);
@@ -3737,6 +4384,7 @@ void RG_GUI_RefreshNewsPanel()
    if(!g_RG_GUI_NewsOpen)
    {
       ObjectDelete(0,RG_GUI_NewsEnableName());
+      ObjectDelete(0,RG_GUI_NewsTimeframeName());
       ObjectDelete(0,RG_GUI_NewsCurrencyName());
       ObjectDelete(0,RG_GUI_NewsImpactName());
       RG_GUI_DeleteNewsSelectorObjects();
@@ -3955,85 +4603,401 @@ void RG_GUI_CreateTabButtons(int x,int y,int w)
 void RG_GUI_CreateToolsPanel()
 {
    if(!g_RG_GUI_ToolsOpen || !g_RG_GUI_PanelExpanded) return;
-   int w=RG_GUI_GetPanelWidth(); int x=RG_GUI_GetPanelX(w); int y=RG_GUI_GetPanelY(); int pw=w;
-   int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(414) : RG_GUI_S(76));
+
+   int w=RG_GUI_GetPanelWidth();
+   int x=RG_GUI_GetPanelX(w);
+   int y=RG_GUI_GetPanelY();
+   int pw=w;
+
+   int sessionH=(g_RG_GUI_SessionsOpen ? RG_GUI_S(138) : RG_GUI_S(44));
+   int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(360) : RG_GUI_S(48));
    int newsH=RG_GUI_S(176);
    if(!g_RG_GUI_NewsOpen) newsH=RG_GUI_S(42);
    else if(g_RG_GUI_NewsSelector==2) newsH=RG_GUI_S(286);
    else if(g_RG_GUI_NewsSelector==3) newsH=RG_GUI_S(226);
-   int ph=specialH+newsH+RG_GUI_S(12);
+
+   int ph=sessionH+specialH+newsH+RG_GUI_S(20);
    int top=y+RG_GUI_HEADER_H+RG_GUI_TAB_H+RG_GUI_S(10);
-   RG_GUI_CreateRect(RG_PREFIX+"TOOLS_BG",x,top,pw,ph,RG_GUI_BG,RG_GUI_BORDER,RG_GUI_Z_PANEL+1);
+
+   RG_GUI_CreateRect(
+      RG_PREFIX+"TOOLS_BG",
+      x,
+      top,
+      pw,
+      ph,
+      RG_GUI_BG,
+      RG_GUI_BORDER,
+      RG_GUI_Z_PANEL+1
+   );
+
+   //=================================================
+   // MARKET SESSIONS
+   //=================================================
+   int sessionTop=top+RG_GUI_S(8);
+   RG_GUI_CreateToolsSessionsPanel(x,sessionTop,pw);
+
+   //=================================================
+   // SPECIAL TIMES
+   //=================================================
+   int specialTop=top+sessionH;
+
    string sec=RG_GUI_ST_SpecialTimesSectionName();
-   RG_GUI_CreateButton(sec,g_RG_GUI_SpecialTimesOpen ? "SPECIAL TIMES   [ - ]" : "SPECIAL TIMES   [ + ]",x+RG_GUI_S(8),top+RG_GUI_S(8),pw-RG_GUI_S(16),RG_GUI_S(32),RG_GUI_HEADER_BG,RG_GUI_YELLOW,RG_GUI_Z_BUTTON+800);
+   RG_GUI_CreateButton(
+      sec,
+      g_RG_GUI_SpecialTimesOpen ? "SPECIAL TIMES   [ - ]" : "SPECIAL TIMES   [ + ]",
+      x+RG_GUI_S(8),
+      specialTop+RG_GUI_S(8),
+      pw-RG_GUI_S(16),
+      RG_GUI_S(32),
+      RG_GUI_HEADER_BG,
+      RG_GUI_YELLOW,
+      RG_GUI_Z_BUTTON+800
+   );
    ObjectSetInteger(0,sec,OBJPROP_FONTSIZE,RG_GUI_FS(10));
 
    if(g_RG_GUI_SpecialTimesOpen)
    {
-      string dwn=RG_GUI_ST_DisplayWindowName(); string lmn=RG_GUI_ST_LabelModeName();
-      bool first=(RG_SpecialTimesGetDisplayWindow()==RG_ST_DISPLAY_FIRST_INDICATOR); bool timeOnly=(RG_SpecialTimesGetLabelMode()==RG_ST_LABEL_TIME_ONLY);
-      int ctrlY=top+RG_GUI_S(70); int ctrlGap=RG_GUI_S(8); int ctrlW=(pw-RG_GUI_S(28)-ctrlGap)/2;
-      RG_GUI_CreateButton(dwn,first ? "WINDOW: 1ST INDICATOR" : "WINDOW: MAIN",x+RG_GUI_S(10),ctrlY,ctrlW,RG_GUI_S(30),clrDarkSlateBlue,clrWhite,RG_GUI_Z_BUTTON+800);
+      string dwn=RG_GUI_ST_DisplayWindowName();
+      string lmn=RG_GUI_ST_LabelModeName();
+      bool first=(RG_SpecialTimesGetDisplayWindow()==RG_ST_DISPLAY_FIRST_INDICATOR);
+      bool timeOnly=(RG_SpecialTimesGetLabelMode()==RG_ST_LABEL_TIME_ONLY);
+
+      int ctrlY=specialTop+RG_GUI_S(70);
+      int ctrlGap=RG_GUI_S(8);
+      int ctrlW=(pw-RG_GUI_S(28)-ctrlGap)/2;
+
+      RG_GUI_CreateButton(
+         dwn,
+         first ? "WINDOW: 1ST INDICATOR" : "WINDOW: MAIN",
+         x+RG_GUI_S(10),
+         ctrlY,
+         ctrlW,
+         RG_GUI_S(30),
+         clrDarkSlateBlue,
+         clrWhite,
+         RG_GUI_Z_BUTTON+800
+      );
       ObjectSetInteger(0,dwn,OBJPROP_FONTSIZE,RG_GUI_FS(8));
-      RG_GUI_CreateButton(lmn,timeOnly ? "LABEL: TIME ONLY" : "LABEL: TIME + LABEL",x+RG_GUI_S(10)+ctrlW+ctrlGap,ctrlY,ctrlW,RG_GUI_S(30),clrDarkGreen,clrWhite,RG_GUI_Z_BUTTON+800);
+
+      RG_GUI_CreateButton(
+         lmn,
+         timeOnly ? "LABEL: TIME ONLY" : "LABEL: TIME + LABEL",
+         x+RG_GUI_S(10)+ctrlW+ctrlGap,
+         ctrlY,
+         ctrlW,
+         RG_GUI_S(30),
+         clrDarkGreen,
+         clrWhite,
+         RG_GUI_Z_BUTTON+800
+      );
       ObjectSetInteger(0,lmn,OBJPROP_FONTSIZE,RG_GUI_FS(8));
-      int rowH=RG_GUI_S(48); int rowY=top+RG_GUI_S(112); int colGap=RG_GUI_S(10); int colW=(pw-RG_GUI_S(20)-colGap)/2; if(colW<170) colW=170;
+
+      int rowH=RG_GUI_S(48);
+      int rowY=specialTop+RG_GUI_S(112);
+      int colGap=RG_GUI_S(10);
+      int colW=(pw-RG_GUI_S(20)-colGap)/2;
+      if(colW<170) colW=170;
+
       for(int i=0;i<10;i++)
       {
-         int col=i/5; int row=i%5; int cx=x+RG_GUI_S(10)+col*(colW+colGap); int yy=rowY+row*rowH;
-         string en=RG_GUI_ST_EnableName(i); string tn=RG_GUI_ST_TimeName(i); string ln=RG_GUI_ST_LabelName(i); string cn=RG_GUI_ST_ColorName(i);
-         bool enabled=RG_SpecialTimesGetEnabled(i); color cc=RG_SpecialTimesGetColor(i);
-         int onW=RG_GUI_S(38); int timeW=RG_GUI_S(60); int colorW=RG_GUI_S(22); int gap=RG_GUI_S(3); int labelW=RG_GUI_S(58);
-         int maxLabelW=colW-onW-timeW-colorW-(gap*3); if(labelW>maxLabelW) labelW=maxLabelW; if(labelW<48) labelW=48;
-         RG_GUI_CreateButton(en,enabled?"ON":"OFF",cx,yy,onW,RG_GUI_S(30),enabled?RG_GUI_GREEN:RG_GUI_HEADER_BG,enabled?clrBlack:RG_GUI_TEXT,RG_GUI_Z_BUTTON+20);
-         RG_GUI_CreateToolEdit(tn,RG_SpecialTimesGetTime(i),cx+onW+gap,yy,timeW,RG_GUI_S(30)); ObjectSetInteger(0,tn,OBJPROP_FONTSIZE,RG_GUI_FS(7));
-         RG_GUI_CreateToolEdit(ln,RG_SpecialTimesGetLabel(i),cx+onW+gap+timeW+gap,yy,labelW,RG_GUI_S(30)); ObjectSetString(0,ln,OBJPROP_TEXT,RG_GUI_ST_DisplayLabel(i,RG_SpecialTimesGetLabel(i))); ObjectSetInteger(0,ln,OBJPROP_FONTSIZE,RG_GUI_FS(7));
-         RG_GUI_CreateButton(cn," ",cx+colW-colorW,yy,colorW,RG_GUI_S(30),cc,clrBlack,RG_GUI_Z_BUTTON+20);
+         int col=i/5;
+         int row=i%5;
+         int cx=x+RG_GUI_S(10)+col*(colW+colGap);
+         int yy=rowY+row*rowH;
+
+         string en=RG_GUI_ST_EnableName(i);
+         string tn=RG_GUI_ST_TimeName(i);
+         string ln=RG_GUI_ST_LabelName(i);
+         string cn=RG_GUI_ST_ColorName(i);
+
+         bool enabled=RG_SpecialTimesGetEnabled(i);
+         color cc=RG_SpecialTimesGetColor(i);
+
+         int onW=RG_GUI_S(38);
+         int timeW=RG_GUI_S(60);
+         int colorW=RG_GUI_S(22);
+         int gap=RG_GUI_S(3);
+         int labelW=RG_GUI_S(58);
+
+         int maxLabelW=colW-onW-timeW-colorW-(gap*3);
+         if(labelW>maxLabelW) labelW=maxLabelW;
+         if(labelW<48) labelW=48;
+
+         RG_GUI_CreateButton(
+            en,
+            enabled ? "ON" : "OFF",
+            cx,
+            yy,
+            onW,
+            RG_GUI_S(30),
+            enabled ? RG_GUI_GREEN : RG_GUI_HEADER_BG,
+            enabled ? clrBlack : RG_GUI_TEXT,
+            RG_GUI_Z_BUTTON+20
+         );
+
+         RG_GUI_CreateToolEdit(
+            tn,
+            RG_SpecialTimesGetTime(i),
+            cx+onW+gap,
+            yy,
+            timeW,
+            RG_GUI_S(30)
+         );
+         ObjectSetInteger(0,tn,OBJPROP_FONTSIZE,RG_GUI_FS(7));
+
+         RG_GUI_CreateToolEdit(
+            ln,
+            RG_SpecialTimesGetLabel(i),
+            cx+onW+gap+timeW+gap,
+            yy,
+            labelW,
+            RG_GUI_S(30)
+         );
+         ObjectSetString(
+            0,
+            ln,
+            OBJPROP_TEXT,
+            RG_GUI_ST_DisplayLabel(i,RG_SpecialTimesGetLabel(i))
+         );
+         ObjectSetInteger(0,ln,OBJPROP_FONTSIZE,RG_GUI_FS(7));
+
+         RG_GUI_CreateButton(
+            cn,
+            " ",
+            cx+colW-colorW,
+            yy,
+            colorW,
+            RG_GUI_S(30),
+            cc,
+            clrBlack,
+            RG_GUI_Z_BUTTON+20
+         );
       }
-      RG_GUI_CreateText(RG_PREFIX+"TOOLS_HINT","Time / Label are edited from MT4 Inputs. Defaults use LB1 ... LB10.",x+RG_GUI_S(12),top+specialH-RG_GUI_S(16),RG_GUI_MUTED,RG_GUI_FS(8),RG_GUI_Z_TEXT+10);
+
+      RG_GUI_CreateText(
+         RG_PREFIX+"TOOLS_HINT",
+         "Time / Label are edited from MT4 Inputs. Defaults use LB1 ... LB10.",
+         x+RG_GUI_S(12),
+         specialTop+specialH-RG_GUI_S(16),
+         RG_GUI_MUTED,
+         RG_GUI_FS(8),
+         RG_GUI_Z_TEXT+10
+      );
    }
 
-   int newsTop=top+specialH+RG_GUI_S(8);
-   string ns=RG_GUI_NewsSectionName();
-   RG_GUI_CreateButton(ns,g_RG_GUI_NewsOpen ? "NEWS   [ - ]" : "NEWS   [ + ]",x+RG_GUI_S(8),newsTop,pw-RG_GUI_S(16),RG_GUI_S(32),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+800);
-   ObjectSetInteger(0,ns,OBJPROP_FONTSIZE,RG_GUI_FS(10));
-   if(!g_RG_GUI_NewsOpen) return;
+   //=================================================
+   // NEWS
+   //=================================================
+   int newsTop=specialTop+specialH+RG_GUI_S(8);
 
-   int ny=newsTop+RG_GUI_S(42); int gap=RG_GUI_S(6); int bw=(pw-RG_GUI_S(20)-gap)/2; if(bw<100) bw=100;
-   string ne=RG_GUI_NewsEnableName(); string nc=RG_GUI_NewsCurrencyName(); string ni=RG_GUI_NewsImpactName();
-   RG_GUI_CreateButton(ne,g_RG_GUI_NewsEnabled?"NEWS: ON":"NEWS: OFF",x+RG_GUI_S(10),ny,bw,RG_GUI_S(30),g_RG_GUI_NewsEnabled?RG_GUI_GREEN:RG_GUI_HEADER_BG,g_RG_GUI_NewsEnabled?clrBlack:RG_GUI_TEXT,RG_GUI_Z_BUTTON+810);
-   // Timeframe is intentionally not configurable. News always uses CURRENT
-   // and is automatically disabled on H4 and higher.  Use plain text rather
-   // than a button so no hidden Timeframe selector can open or overflow.
-   RG_GUI_CreateButton(RG_GUI_NewsTimeframeName(), "TF: CURRENT", x+RG_GUI_S(10)+bw+gap, ny, bw, RG_GUI_S(30), RG_GUI_HEADER_BG, clrWhite, RG_GUI_Z_BUTTON+810);
+   string ns=RG_GUI_NewsSectionName();
+   RG_GUI_CreateButton(
+      ns,
+      g_RG_GUI_NewsOpen ? "NEWS   [ - ]" : "NEWS   [ + ]",
+      x+RG_GUI_S(8),
+      newsTop,
+      pw-RG_GUI_S(16),
+      RG_GUI_S(32),
+      RG_GUI_HEADER_BG,
+      RG_GUI_CYAN,
+      RG_GUI_Z_BUTTON+800
+   );
+   ObjectSetInteger(0,ns,OBJPROP_FONTSIZE,RG_GUI_FS(10));
+
+   if(!g_RG_GUI_NewsOpen)
+      return;
+
+   int ny=newsTop+RG_GUI_S(42);
+   int gap=RG_GUI_S(6);
+   int bw=(pw-RG_GUI_S(20)-gap)/2;
+   if(bw<100) bw=100;
+
+   string ne=RG_GUI_NewsEnableName();
+   string nc=RG_GUI_NewsCurrencyName();
+   string ni=RG_GUI_NewsImpactName();
+
+   RG_GUI_CreateButton(
+      ne,
+      g_RG_GUI_NewsEnabled ? "NEWS: ON" : "NEWS: OFF",
+      x+RG_GUI_S(10),
+      ny,
+      bw,
+      RG_GUI_S(30),
+      g_RG_GUI_NewsEnabled ? RG_GUI_GREEN : RG_GUI_HEADER_BG,
+      g_RG_GUI_NewsEnabled ? clrBlack : RG_GUI_TEXT,
+      RG_GUI_Z_BUTTON+810
+   );
+
+   // News is always CURRENT timeframe and is suppressed on H4 and higher.
+   RG_GUI_CreateButton(
+      RG_GUI_NewsTimeframeName(),
+      "TF: CURRENT",
+      x+RG_GUI_S(10)+bw+gap,
+      ny,
+      bw,
+      RG_GUI_S(30),
+      RG_GUI_HEADER_BG,
+      clrWhite,
+      RG_GUI_Z_BUTTON+810
+   );
    ObjectSetInteger(0,RG_GUI_NewsTimeframeName(),OBJPROP_FONTSIZE,RG_GUI_FS(9));
+
    ny+=RG_GUI_S(36);
-   RG_GUI_CreateButton(nc,RG_GUI_NewsCurrencyText(),x+RG_GUI_S(10),ny,bw,RG_GUI_S(30),clrDarkGreen,clrWhite,RG_GUI_Z_BUTTON+810);
-   RG_GUI_CreateButton(ni,RG_GUI_NewsImpactText(),x+RG_GUI_S(10)+bw+gap,ny,bw,RG_GUI_S(30),clrDarkRed,clrWhite,RG_GUI_Z_BUTTON+810);
+
+   RG_GUI_CreateButton(
+      nc,
+      RG_GUI_NewsCurrencyText(),
+      x+RG_GUI_S(10),
+      ny,
+      bw,
+      RG_GUI_S(30),
+      clrDarkGreen,
+      clrWhite,
+      RG_GUI_Z_BUTTON+810
+   );
+
+   RG_GUI_CreateButton(
+      ni,
+      RG_GUI_NewsImpactText(),
+      x+RG_GUI_S(10)+bw+gap,
+      ny,
+      bw,
+      RG_GUI_S(30),
+      clrDarkRed,
+      clrWhite,
+      RG_GUI_Z_BUTTON+810
+   );
+
    ny+=RG_GUI_S(42);
 
    if(g_RG_GUI_NewsSelector==2)
    {
-      int sg=RG_GUI_S(5); int sw=(pw-RG_GUI_S(20)-2*sg)/3; string curNames[9]={"USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD","ALL"};
-      for(int i=0;i<9;i++){ int col=i%3; int row=i/3; int sx=x+RG_GUI_S(10)+col*(sw+sg); int sy=ny+row*RG_GUI_S(30); bool sel=(i==8 ? g_RG_GUI_NewsCurrencyMode==255 : g_RG_GUI_NewsCurrencyMode!=255 && (g_RG_GUI_NewsCurrencyMode&(1<<i))!=0); RG_GUI_CreateButton(RG_GUI_NewsCurrencyItemName(i),curNames[i],sx,sy,sw,RG_GUI_S(26),sel?RG_GUI_GREEN:RG_GUI_HEADER_BG,sel?clrBlack:RG_GUI_TEXT,RG_GUI_Z_BUTTON+850); }
-      RG_GUI_CreateButton(RG_GUI_NewsDoneName(),"DONE",x+RG_GUI_S(10),ny+2*RG_GUI_S(30),pw-RG_GUI_S(20),RG_GUI_S(26),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+850);
+      int sg=RG_GUI_S(5);
+      int sw=(pw-RG_GUI_S(20)-2*sg)/3;
+      string curNames[9]={"USD","EUR","GBP","JPY","AUD","CAD","CHF","NZD","ALL"};
+
+      for(int i=0;i<9;i++)
+      {
+         int col=i%3;
+         int row=i/3;
+         int sx=x+RG_GUI_S(10)+col*(sw+sg);
+         int sy=ny+row*RG_GUI_S(30);
+         bool sel=(i==8
+            ? g_RG_GUI_NewsCurrencyMode==255
+            : g_RG_GUI_NewsCurrencyMode!=255 &&
+              (g_RG_GUI_NewsCurrencyMode&(1<<i))!=0);
+
+         RG_GUI_CreateButton(
+            RG_GUI_NewsCurrencyItemName(i),
+            curNames[i],
+            sx,
+            sy,
+            sw,
+            RG_GUI_S(26),
+            sel ? RG_GUI_GREEN : RG_GUI_HEADER_BG,
+            sel ? clrBlack : RG_GUI_TEXT,
+            RG_GUI_Z_BUTTON+850
+         );
+      }
+
+      RG_GUI_CreateButton(
+         RG_GUI_NewsDoneName(),
+         "DONE",
+         x+RG_GUI_S(10),
+         ny+2*RG_GUI_S(30),
+         pw-RG_GUI_S(20),
+         RG_GUI_S(26),
+         RG_GUI_HEADER_BG,
+         RG_GUI_CYAN,
+         RG_GUI_Z_BUTTON+850
+      );
    }
    else if(g_RG_GUI_NewsSelector==3)
    {
-      int sg=RG_GUI_S(5); int sw=(pw-RG_GUI_S(20)-2*sg)/3; string impNames[4]={"HIGH","MED","LOW","ALL"};
-      for(int i=0;i<4;i++){ int col=i%3; int row=i/3; int sx=x+RG_GUI_S(10)+col*(sw+sg); int sy=ny+row*RG_GUI_S(30); bool sel=(i==0?((g_RG_GUI_NewsImpactMode&1)!=0):i==1?((g_RG_GUI_NewsImpactMode&2)!=0):i==2?((g_RG_GUI_NewsImpactMode&4)!=0):g_RG_GUI_NewsImpactMode==7); RG_GUI_CreateButton(RG_GUI_NewsImpactItemName(i),impNames[i],sx,sy,sw,RG_GUI_S(26),sel?RG_GUI_RED:RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+850); }
-      RG_GUI_CreateButton(RG_GUI_NewsDoneName(),"DONE",x+RG_GUI_S(10),ny+2*RG_GUI_S(30),pw-RG_GUI_S(20),RG_GUI_S(26),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+850);
+      int sg=RG_GUI_S(5);
+      int sw=(pw-RG_GUI_S(20)-2*sg)/3;
+      string impNames[4]={"HIGH","MED","LOW","ALL"};
+
+      for(int i=0;i<4;i++)
+      {
+         int col=i%3;
+         int row=i/3;
+         int sx=x+RG_GUI_S(10)+col*(sw+sg);
+         int sy=ny+row*RG_GUI_S(30);
+         bool sel=(i==0
+            ? ((g_RG_GUI_NewsImpactMode&1)!=0)
+            : i==1
+            ? ((g_RG_GUI_NewsImpactMode&2)!=0)
+            : i==2
+            ? ((g_RG_GUI_NewsImpactMode&4)!=0)
+            : g_RG_GUI_NewsImpactMode==7);
+
+         RG_GUI_CreateButton(
+            RG_GUI_NewsImpactItemName(i),
+            impNames[i],
+            sx,
+            sy,
+            sw,
+            RG_GUI_S(26),
+            sel ? RG_GUI_RED : RG_GUI_HEADER_BG,
+            RG_GUI_TEXT,
+            RG_GUI_Z_BUTTON+850
+         );
+      }
+
+      RG_GUI_CreateButton(
+         RG_GUI_NewsDoneName(),
+         "DONE",
+         x+RG_GUI_S(10),
+         ny+2*RG_GUI_S(30),
+         pw-RG_GUI_S(20),
+         RG_GUI_S(26),
+         RG_GUI_HEADER_BG,
+         RG_GUI_CYAN,
+         RG_GUI_Z_BUTTON+850
+      );
    }
 
-   // Footer information is shown only in the normal News state.
-   // Selector states use the full News area for the options and DONE button.
    if(g_RG_GUI_NewsSelector==0)
    {
       int infoY=newsTop+RG_GUI_S(116);
-      RG_GUI_CreateText(RG_GUI_NewsSourceName(),"SOURCE: FOREXFACTORY",x+RG_GUI_S(12),infoY,RG_GUI_MUTED,RG_GUI_FS(7),RG_GUI_Z_TEXT+20);
-      RG_GUI_CreateText(RG_GUI_NewsStatusName(),"TIME + CURRENCY + IMPACT | SERVER TIME",x+RG_GUI_S(12),infoY+RG_GUI_S(14),RG_GUI_MUTED,RG_GUI_FS(6),RG_GUI_Z_TEXT+20);
-      RG_GUI_CreateText(RG_GUI_NEWS_PREFIX+"FUTURE","TODAY NEWS ONLY",x+RG_GUI_S(12),infoY+RG_GUI_S(28),RG_GUI_MUTED,RG_GUI_FS(6),RG_GUI_Z_TEXT+20);
+
+      RG_GUI_CreateText(
+         RG_GUI_NewsSourceName(),
+         "SOURCE: FOREXFACTORY",
+         x+RG_GUI_S(12),
+         infoY,
+         RG_GUI_MUTED,
+         RG_GUI_FS(7),
+         RG_GUI_Z_TEXT+20
+      );
+
+      RG_GUI_CreateText(
+         RG_GUI_NewsStatusName(),
+         "TIME + CURRENCY + IMPACT | SERVER TIME",
+         x+RG_GUI_S(12),
+         infoY+RG_GUI_S(14),
+         RG_GUI_MUTED,
+         RG_GUI_FS(6),
+         RG_GUI_Z_TEXT+20
+      );
+
+      RG_GUI_CreateText(
+         RG_GUI_NEWS_PREFIX+"FUTURE",
+         "TODAY NEWS ONLY",
+         x+RG_GUI_S(12),
+         infoY+RG_GUI_S(28),
+         RG_GUI_MUTED,
+         RG_GUI_FS(6),
+         RG_GUI_Z_TEXT+20
+      );
    }
+
+   // Draw the session visualization whenever the Tools surface is rebuilt.
+   // This is independent from the panel controls and uses Broker Server Time.
+   RG_GUI_DrawMarketSessions();
+
+   ChartRedraw();
 }
 
 void RG_GUI_ToggleSpecialTimes()
@@ -4056,61 +5020,147 @@ void RG_GUI_UpdateToolsPanel()
 {
    if(!g_RG_GUI_ToolsOpen) return;
 
+   // Keep Market Sessions controls synchronized with runtime state.
+   string sn=RG_GUI_SessionControlName("ON_VALUE");
+   if(ObjectFind(0,sn)>=0)
+   {
+      if(g_RG_GUI_SessionsEnabled)
+         ObjectSetString(0,sn,OBJPROP_TEXT,"ON");
+      else
+         ObjectSetString(0,sn,OBJPROP_TEXT,"OFF");
+      if(g_RG_GUI_SessionsEnabled)
+      {
+         ObjectSetInteger(0,sn,OBJPROP_BGCOLOR,RG_GUI_GREEN);
+         ObjectSetInteger(0,sn,OBJPROP_COLOR,clrBlack);
+      }
+      else
+      {
+         ObjectSetInteger(0,sn,OBJPROP_BGCOLOR,RG_GUI_HEADER_BG);
+         ObjectSetInteger(0,sn,OBJPROP_COLOR,RG_GUI_TEXT);
+      }
+   }
+
+   sn=RG_GUI_SessionControlName("CURRENT_VALUE");
+   if(ObjectFind(0,sn)>=0)
+   {
+      if(g_RG_GUI_SessionsCurrent)
+         ObjectSetString(0,sn,OBJPROP_TEXT,"ON");
+      else
+         ObjectSetString(0,sn,OBJPROP_TEXT,"OFF");
+      if(g_RG_GUI_SessionsCurrent)
+      {
+         ObjectSetInteger(0,sn,OBJPROP_BGCOLOR,RG_GUI_GREEN);
+         ObjectSetInteger(0,sn,OBJPROP_COLOR,clrBlack);
+      }
+      else
+      {
+         ObjectSetInteger(0,sn,OBJPROP_BGCOLOR,RG_GUI_HEADER_BG);
+         ObjectSetInteger(0,sn,OBJPROP_COLOR,RG_GUI_TEXT);
+      }
+   }
+
+   sn=RG_GUI_SessionControlName("FUTURE_VALUE");
+   if(ObjectFind(0,sn)>=0)
+      ObjectSetString(0,sn,OBJPROP_TEXT,IntegerToString(g_RG_GUI_SessionsFuture));
+
+   sn=RG_GUI_SessionControlName("LABELS_VALUE");
+   if(ObjectFind(0,sn)>=0)
+   {
+      if(g_RG_GUI_SessionsLabels)
+         ObjectSetString(0,sn,OBJPROP_TEXT,"ON");
+      else
+         ObjectSetString(0,sn,OBJPROP_TEXT,"OFF");
+      if(g_RG_GUI_SessionsLabels)
+      {
+         ObjectSetInteger(0,sn,OBJPROP_BGCOLOR,RG_GUI_GREEN);
+         ObjectSetInteger(0,sn,OBJPROP_COLOR,clrBlack);
+      }
+      else
+      {
+         ObjectSetInteger(0,sn,OBJPROP_BGCOLOR,RG_GUI_HEADER_BG);
+         ObjectSetInteger(0,sn,OBJPROP_COLOR,RG_GUI_TEXT);
+      }
+   }
+
    string sec=RG_GUI_ST_SpecialTimesSectionName();
    if(ObjectFind(0,sec)>=0)
-      ObjectSetString(0,sec,OBJPROP_TEXT,g_RG_GUI_SpecialTimesOpen ? "SPECIAL TIMES   [ - ]" : "SPECIAL TIMES   [ + ]");
+   {
+      if(g_RG_GUI_SpecialTimesOpen)
+         ObjectSetString(0,sec,OBJPROP_TEXT,"SPECIAL TIMES   [ - ]");
+      else
+         ObjectSetString(0,sec,OBJPROP_TEXT,"SPECIAL TIMES   [ + ]");
+   }
 
    if(g_RG_GUI_SpecialTimesOpen)
    {
-   string dwn=RG_GUI_ST_DisplayWindowName();
-   string lmn=RG_GUI_ST_LabelModeName();
-   if(ObjectFind(0,dwn)>=0)
-   {
-      bool first=(RG_SpecialTimesGetDisplayWindow()==RG_ST_DISPLAY_FIRST_INDICATOR);
-      ObjectSetString(0,dwn,OBJPROP_TEXT,first?"WINDOW: 1ST INDICATOR":"WINDOW: MAIN");
-   }
-   if(ObjectFind(0,lmn)>=0)
-   {
-      bool timeOnly=(RG_SpecialTimesGetLabelMode()==RG_ST_LABEL_TIME_ONLY);
-      ObjectSetString(0,lmn,OBJPROP_TEXT,timeOnly?"LABEL: TIME ONLY":"LABEL: TIME + LABEL");
-   }
-   for(int i=0;i<10;i++)
-   {
-      string en=RG_GUI_ST_EnableName(i);
-      string ln=RG_GUI_ST_LabelName(i);
-      string cn=RG_GUI_ST_ColorName(i);
-      if(ObjectFind(0,en)>=0)
+      string dwn=RG_GUI_ST_DisplayWindowName();
+      string lmn=RG_GUI_ST_LabelModeName();
+      if(ObjectFind(0,dwn)>=0)
       {
-         bool v=RG_SpecialTimesGetEnabled(i);
-         ObjectSetString(0,en,OBJPROP_TEXT,v?"ON":"OFF");
-         ObjectSetInteger(0,en,OBJPROP_BGCOLOR,v?RG_GUI_GREEN:RG_GUI_HEADER_BG);
-         ObjectSetInteger(0,en,OBJPROP_COLOR,v?clrBlack:RG_GUI_TEXT);
+         bool first=(RG_SpecialTimesGetDisplayWindow()==RG_ST_DISPLAY_FIRST_INDICATOR);
+         if(first)
+            ObjectSetString(0,dwn,OBJPROP_TEXT,"WINDOW: 1ST INDICATOR");
+         else
+            ObjectSetString(0,dwn,OBJPROP_TEXT,"WINDOW: MAIN");
       }
-      // Always show the compact identifier for every Special Time.
-      // LB1..LB10 are panel identifiers only; the actual trader label
-      // remains the value entered in MT4 Inputs.
-      if(ObjectFind(0,ln)>=0)
-         ObjectSetString(0,ln,OBJPROP_TEXT,"LB"+IntegerToString(i+1));
-
-      if(ObjectFind(0,cn)>=0)
-         ObjectSetInteger(0,cn,OBJPROP_BGCOLOR,RG_SpecialTimesGetColor(i));
+      if(ObjectFind(0,lmn)>=0)
+      {
+         bool timeOnly=(RG_SpecialTimesGetLabelMode()==RG_ST_LABEL_TIME_ONLY);
+         if(timeOnly)
+            ObjectSetString(0,lmn,OBJPROP_TEXT,"LABEL: TIME ONLY");
+         else
+            ObjectSetString(0,lmn,OBJPROP_TEXT,"LABEL: TIME + LABEL");
+      }
+      for(int i=0;i<10;i++)
+      {
+         string en=RG_GUI_ST_EnableName(i);
+         string ln=RG_GUI_ST_LabelName(i);
+         string cn=RG_GUI_ST_ColorName(i);
+         if(ObjectFind(0,en)>=0)
+         {
+            bool v=RG_SpecialTimesGetEnabled(i);
+            if(v)
+               ObjectSetString(0,en,OBJPROP_TEXT,"ON");
+            else
+               ObjectSetString(0,en,OBJPROP_TEXT,"OFF");
+            if(v)
+               ObjectSetInteger(0,en,OBJPROP_BGCOLOR,RG_GUI_GREEN);
+            else
+               ObjectSetInteger(0,en,OBJPROP_BGCOLOR,RG_GUI_HEADER_BG);
+            if(v)
+               ObjectSetInteger(0,en,OBJPROP_COLOR,clrBlack);
+            else
+               ObjectSetInteger(0,en,OBJPROP_COLOR,RG_GUI_TEXT);
+         }
+         if(ObjectFind(0,ln)>=0)
+            ObjectSetString(0,ln,OBJPROP_TEXT,"LB"+IntegerToString(i+1));
+         if(ObjectFind(0,cn)>=0)
+            ObjectSetInteger(0,cn,OBJPROP_BGCOLOR,RG_SpecialTimesGetColor(i));
+      }
    }
 
-   }
-
-   // News controls are display-only until the News engine is connected.
    if(ObjectFind(0,RG_GUI_NewsEnableName())>=0)
    {
       bool on=g_RG_GUI_NewsEnabled;
-      ObjectSetString(0,RG_GUI_NewsEnableName(),OBJPROP_TEXT,on?"NEWS: ON":"NEWS: OFF");
-      ObjectSetInteger(0,RG_GUI_NewsEnableName(),OBJPROP_BGCOLOR,on?RG_GUI_GREEN:RG_GUI_HEADER_BG);
-      ObjectSetInteger(0,RG_GUI_NewsEnableName(),OBJPROP_COLOR,on?clrBlack:RG_GUI_TEXT);
+      if(on)
+         ObjectSetString(0,RG_GUI_NewsEnableName(),OBJPROP_TEXT,"NEWS: ON");
+      else
+         ObjectSetString(0,RG_GUI_NewsEnableName(),OBJPROP_TEXT,"NEWS: OFF");
+      if(on)
+         ObjectSetInteger(0,RG_GUI_NewsEnableName(),OBJPROP_BGCOLOR,RG_GUI_GREEN);
+      else
+         ObjectSetInteger(0,RG_GUI_NewsEnableName(),OBJPROP_BGCOLOR,RG_GUI_HEADER_BG);
+      if(on)
+         ObjectSetInteger(0,RG_GUI_NewsEnableName(),OBJPROP_COLOR,clrBlack);
+      else
+         ObjectSetInteger(0,RG_GUI_NewsEnableName(),OBJPROP_COLOR,RG_GUI_TEXT);
    }
    if(ObjectFind(0,RG_GUI_NewsCurrencyName())>=0)
       ObjectSetString(0,RG_GUI_NewsCurrencyName(),OBJPROP_TEXT,RG_GUI_NewsCurrencyText());
    if(ObjectFind(0,RG_GUI_NewsImpactName())>=0)
       ObjectSetString(0,RG_GUI_NewsImpactName(),OBJPROP_TEXT,RG_GUI_NewsImpactText());
 }
+
 
 //====================================================
 // Create Panel
@@ -4216,13 +5266,14 @@ bool RG_CreatePanel()
 
    if(g_RG_GUI_ToolsOpen)
    {
-      int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(414) : RG_GUI_S(76));
+         int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(360) : RG_GUI_S(48));
       int newsH=RG_GUI_S(176);
       if(!g_RG_GUI_NewsOpen) newsH=RG_GUI_S(42);
       
       else if(g_RG_GUI_NewsSelector==2) newsH=RG_GUI_S(286);
       else if(g_RG_GUI_NewsSelector==3) newsH=RG_GUI_S(226);
-      int toolsH=specialH+newsH+RG_GUI_S(12);
+      int sessionH=(g_RG_GUI_SessionsOpen ? RG_GUI_S(138) : RG_GUI_S(44));
+       int toolsH=sessionH+specialH+newsH+RG_GUI_S(20);
       L.panelH=RG_GUI_HEADER_H+RG_GUI_TAB_H+RG_GUI_S(4)+toolsH+RG_GUI_S(8);
    }
 

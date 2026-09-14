@@ -667,6 +667,11 @@ int OnInit()
 
    RG_SpecialTimesInit();
 
+   // Clear chart objects left by an older News/Session EA instance before
+   // rebuilding the current panel and timeline visualization.
+   RG_NewsDeleteObjects();
+   RG_GUI_DeleteSessionObjects();
+
    EventSetTimer(1);
    ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,true);
 
@@ -728,6 +733,12 @@ void OnDeinit(const int reason)
    RG_TrailingSetupClose();
    RG_TV_DeleteTradeVisualization();
    RG_SpecialTimesDelete();
+
+   // News and Sessions are chart objects, so remove them explicitly on EA
+   // deinitialization. They will be recreated cleanly after reinitialization.
+   RG_NewsDeleteObjects();
+   RG_GUI_DeleteSessionObjects();
+
    RG_DeletePanel();
 
    RG_RestoreChartState();
@@ -751,6 +762,7 @@ void OnTimer()
 
    RG_RuntimeSyncInputDefaults();
    RG_NewsEngineUpdate();
+   RG_GUI_UpdateSessionVisualization();
    RG_ProcessPositionManager();
 
    RG_UpdateGUI();
@@ -779,6 +791,7 @@ void OnTick()
    }
 
    RG_RuntimeSyncInputDefaults();
+   RG_GUI_UpdateSessionVisualization();
    RG_ProcessPositionManager();
 
    // Manual RF is controlled by the position-row RF button.
@@ -939,6 +952,35 @@ void OnChartEvent(
          RG_CreatePanel();
          return;
       }
+      //=================================================
+      // MARKET SESSIONS CONTROLS
+      //=================================================
+      if(sparam==RG_GUI_SessionControlName("SECTION"))
+      {
+         RG_GUI_ToggleSessionsSection();
+         return;
+      }
+      if(sparam==RG_GUI_SessionControlName("ON_VALUE"))
+      {
+         RG_GUI_ToggleSessionsEnabled();
+         return;
+      }
+      if(sparam==RG_GUI_SessionControlName("CURRENT_VALUE"))
+      {
+         RG_GUI_ToggleSessionsCurrent();
+         return;
+      }
+      if(sparam==RG_GUI_SessionControlName("FUTURE_VALUE"))
+      {
+         RG_GUI_CycleSessionsFuture();
+         return;
+      }
+      if(sparam==RG_GUI_SessionControlName("LABELS_VALUE"))
+      {
+         RG_GUI_ToggleSessionsLabels();
+         return;
+      }
+
       if(sparam==RG_GUI_ST_SpecialTimesSectionName())
       {
          RG_GUI_ToggleSpecialTimes();
