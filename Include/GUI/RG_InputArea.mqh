@@ -53,7 +53,7 @@ bool RG_CreateInputArea(
 
    RG_CreateEdit(
       RG_PREFIX+"SL",
-      IntegerToString(RG_RuntimeStopLoss()),
+      DoubleToString(RG_RuntimePointsToPips(RG_RuntimeStopLoss()),0),
       panelX + 70,
       panelY + 97,
       RG_EDIT_WIDTH,
@@ -75,7 +75,7 @@ bool RG_CreateInputArea(
 
    RG_CreateEdit(
       RG_PREFIX+"TP",
-      IntegerToString(RG_RuntimeTakeProfit()),
+      DoubleToString(RG_RuntimePointsToPips(RG_RuntimeTakeProfit()),0),
       panelX + 70,
       panelY + 127,
       RG_EDIT_WIDTH,

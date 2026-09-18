@@ -666,6 +666,7 @@ int OnInit()
    // an MQL4 ChartSetInteger property.
 
    RG_SpecialTimesInit();
+   RG_GUI_LoadToolsPreferences();
 
    // Clear chart objects left by an older News/Session EA instance before
    // rebuilding the current panel and timeline visualization.
@@ -674,6 +675,7 @@ int OnInit()
 
    EventSetTimer(1);
    ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,true);
+   ChartSetInteger(0,CHART_EVENT_MOUSE_WHEEL,true);
 
    if(!RG_CreatePanel())
    {
@@ -729,6 +731,7 @@ void OnDeinit(const int reason)
 
    EventKillTimer();
    ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,false);
+   ChartSetInteger(0,CHART_EVENT_MOUSE_WHEEL,false);
 
    RG_TrailingSetupClose();
    RG_TV_DeleteTradeVisualization();
@@ -868,6 +871,24 @@ void OnChartEvent(
    }
 
    //=================================================
+   // OPEN POSITIONS SCROLLBAR
+   //=================================================
+   if(id==CHARTEVENT_OBJECT_CLICK)
+   {
+      if(sparam==RG_GUI_POS_SCROLL_TRACK)
+      {
+         RG_GUI_HandlePositionScrollbarClick((int)dparam);
+         return;
+      }
+   }
+
+   if(id==CHARTEVENT_OBJECT_DRAG)
+   {
+      if(RG_GUI_HandlePositionScrollbarDrag(sparam))
+         return;
+   }
+
+   //=================================================
    // PREVIEW LINE DRAG
    //=================================================
    // Entry / SL / TP preview lines are native MT4 chart
@@ -943,12 +964,18 @@ void OnChartEvent(
       if(sparam==RG_GUI_TRADE_TAB)
       {
          g_RG_GUI_ToolsOpen=false;
+         // Persist the selected main tab so a timeframe/symbol chart
+         // reinitialization restores TRADE instead of the previous tab.
+         RG_GUI_SaveToolsPreferences();
          RG_CreatePanel();
          return;
       }
       if(sparam==RG_GUI_TOOLS_TAB)
       {
          g_RG_GUI_ToolsOpen=true;
+         // Persist the selected main tab so a timeframe/symbol chart
+         // reinitialization restores TOOLS when that is the user's choice.
+         RG_GUI_SaveToolsPreferences();
          RG_CreatePanel();
          return;
       }

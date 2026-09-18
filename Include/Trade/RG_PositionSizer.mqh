@@ -226,7 +226,7 @@ double RG_CalculatePreviewLot(
 // Returns:
 // 0 = no SL
 //
-// Uses runtime SL value.
+// Uses runtime SL value stored internally as broker POINTS.
 //====================================================
 
 double RG_GetStopLossPrice(
@@ -321,7 +321,7 @@ double RG_GetStopLossPrice(
 // Returns:
 // 0 = no TP
 //
-// Uses runtime TP value.
+// Uses runtime TP value stored internally as broker POINTS.
 //====================================================
 
 double RG_GetTakeProfitPrice(

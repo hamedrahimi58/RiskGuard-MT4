@@ -70,7 +70,7 @@ input string RG_SECTION_SL =
 
 input bool UseStopLoss = true;
 
-input int StopLoss = 100;
+input int StopLossPips = 100; // PIP distance
 
 
 //====================================================
@@ -82,7 +82,7 @@ input string RG_SECTION_TP =
 
 input bool UseTakeProfit = true;
 
-input int TakeProfit = 200;
+input int TakeProfitPips = 200; // PIP distance
 
 
 //====================================================
@@ -94,7 +94,7 @@ input string RG_SECTION_RISKFREE =
 
 // Manual RF is always available from the position row.
 // Auto RF is controlled only by the panel ON/OFF button.
-input int RiskFreeTriggerPips = 400;
+input int RiskFreeTriggerPips = 400; // PIP distance
 
 // Display period for closed-account P/L shown on the panel.
 enum ENUM_RG_PL_PERIOD

@@ -131,6 +131,12 @@ void RG_TrailingSetConfig(
    if(distancePips<=0.0) distancePips=RG_TR_DEFAULT_DISTANCE_PIPS;
    if(maPeriod<2) maPeriod=2;
 
+   // A new trailing configuration starts a fresh activation cycle.
+   // Do not reuse Candle/MA state from a previous configuration.
+   GlobalVariableDel(RG_TrailingLastBarKey(ticket));
+   GlobalVariableDel(RG_TrailingCandleStartBarKey(ticket));
+   GlobalVariableDel(RG_TrailingMAStateKey(ticket));
+
    GlobalVariableSet(RG_TrailingMethodKey(ticket),(double)method);
    GlobalVariableSet(RG_TrailingStartKey(ticket),startPips);
    GlobalVariableSet(RG_TrailingDistanceKey(ticket),distancePips);
@@ -180,6 +186,8 @@ void RG_SetTrailingEnabled(int ticket,bool enabled)
    if(enabled)
    {
       GlobalVariableSet(RG_TrailingStateKey(ticket),1.0);
+      GlobalVariableDel(RG_TrailingLastBarKey(ticket));
+      GlobalVariableDel(RG_TrailingCandleStartBarKey(ticket));
       GlobalVariableDel(RG_TrailingMAStateKey(ticket));
 
       ENUM_RG_TRAILING_METHOD method;
@@ -468,14 +476,12 @@ bool RG_TrailingCandle(int ticket)
    // C1 = candle immediately before C0 (shift 2)
    //
    // BUY:
-   //   Normally C1 is the reference candle.
-   //   If C0 has a HIGHER Low than C1, C0 becomes the reference.
-   //   Therefore the reference Low is max(Low(C0),Low(C1)).
+   //   Normally use C1 (one closed candle behind the live candle).
+   //   Exception: if C0 Low is LOWER than C1 Low, use C0.
    //
    // SELL:
-   //   Normally C1 is the reference candle.
-   //   If C0 has a LOWER High than C1, C0 becomes the reference.
-   //   Therefore the reference High is min(High(C0),High(C1)).
+   //   Normally use C1 (one closed candle behind the live candle).
+   //   Exception: if C0 High is HIGHER than C1 High, use C0.
    //
    // SL is never allowed to move backwards. RG_TrailingModify()
    // enforces that rule for both BUY and SELL, so Distance trailing
@@ -494,12 +500,22 @@ bool RG_TrailingCandle(int ticket)
 
    if(OrderType()==OP_BUY)
    {
-      double referenceLow=MathMax(lowC0,lowC1);
+      // Normal: C1. Exception only when the latest closed candle
+      // makes a new adverse low below the previous closed candle.
+      double referenceLow=lowC1;
+      if(lowC0<lowC1)
+         referenceLow=lowC0;
+
       candidate=NormalizeDouble(referenceLow-RG_TR_CANDLE_BUFFER_PIPS*pip,digits);
    }
    else if(OrderType()==OP_SELL)
    {
-      double referenceHigh=MathMin(highC0,highC1);
+      // Normal: C1. Exception only when the latest closed candle
+      // makes a new adverse high above the previous closed candle.
+      double referenceHigh=highC1;
+      if(highC0>highC1)
+         referenceHigh=highC0;
+
       candidate=NormalizeDouble(referenceHigh+RG_TR_CANDLE_BUFFER_PIPS*pip,digits);
    }
    else

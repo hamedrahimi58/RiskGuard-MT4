@@ -118,16 +118,16 @@ double RG_GetTPLevelPrice(int ticket)
       return(manual);
 
    if(!RG_RuntimeUseTakeProfit() ||
-      TakeProfit<=0)
+      RG_RuntimeTakeProfit()<=0)
       return(0);
 
    double price=0;
 
    if(OrderType()==OP_BUY)
-      price=OrderOpenPrice()+TakeProfit*Point;
+      price=OrderOpenPrice()+RG_RuntimeTakeProfit()*Point;
    else
    if(OrderType()==OP_SELL)
-      price=OrderOpenPrice()-TakeProfit*Point;
+      price=OrderOpenPrice()-RG_RuntimeTakeProfit()*Point;
    else
       return(0);
 

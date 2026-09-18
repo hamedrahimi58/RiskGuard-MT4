@@ -197,8 +197,8 @@ void RG_TS_Refresh()
 
       if(g_RG_TS_Method==RG_TRAILING_CANDLE)
       {
-         RG_TS_Label(RG_TS_BUFFER,"Reference: candle before the last closed candle",lx,y+220,w-48,26,9,clrSilver);
-         RG_TS_Label(RG_TS_TF_L,"BUY: Low - 1 pip | SELL: High + 1 pip",lx,y+252,w-48,26,9,clrSilver);
+         RG_TS_Label(RG_TS_BUFFER,"Normal reference: candle before the last closed candle; exception on new adverse extreme",lx,y+220,w-48,26,9,clrSilver);
+         RG_TS_Label(RG_TS_TF_L,"BUY: Low - 5 pips | SELL: High + 5 pips",lx,y+252,w-48,26,9,clrSilver);
       }
       else if(g_RG_TS_Method==RG_TRAILING_MOVING)
       {

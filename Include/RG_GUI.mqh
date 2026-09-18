@@ -102,6 +102,68 @@ bool g_RG_GUI_SessionsLabels=true;
 bool g_RG_GUI_SessionsOpen=true;
 int  g_RG_GUI_SessionsLastMinute=-1;
 
+//====================================================
+// TOOLS UI PERSISTENCE
+// User selections in Tools are terminal/account preferences,
+// not temporary runtime values.
+//====================================================
+string RG_GUI_PrefPrefix()
+{
+   return("RG_GUI_PREF_"+IntegerToString(AccountNumber())+"_"+Symbol()+"_");
+}
+
+string RG_GUI_PrefKey(string name)
+{
+   return(RG_GUI_PrefPrefix()+name);
+}
+
+void RG_GUI_SaveToolsPreferences()
+{
+   GlobalVariableSet(RG_GUI_PrefKey("TOOLS_OPEN"),g_RG_GUI_ToolsOpen?1.0:0.0);
+   GlobalVariableSet(RG_GUI_PrefKey("SPECIAL_OPEN"),g_RG_GUI_SpecialTimesOpen?1.0:0.0);
+   GlobalVariableSet(RG_GUI_PrefKey("NEWS_OPEN"),g_RG_GUI_NewsOpen?1.0:0.0);
+   GlobalVariableSet(RG_GUI_PrefKey("NEWS_ENABLED"),g_RG_GUI_NewsEnabled?1.0:0.0);
+   GlobalVariableSet(RG_GUI_PrefKey("NEWS_CURRENCY"),(double)g_RG_GUI_NewsCurrencyMode);
+   GlobalVariableSet(RG_GUI_PrefKey("NEWS_IMPACT"),(double)g_RG_GUI_NewsImpactMode);
+
+   GlobalVariableSet(RG_GUI_PrefKey("SESS_ENABLED"),g_RG_GUI_SessionsEnabled?1.0:0.0);
+   GlobalVariableSet(RG_GUI_PrefKey("SESS_CURRENT"),g_RG_GUI_SessionsCurrent?1.0:0.0);
+   GlobalVariableSet(RG_GUI_PrefKey("SESS_FUTURE"),(double)g_RG_GUI_SessionsFuture);
+   GlobalVariableSet(RG_GUI_PrefKey("SESS_LABELS"),g_RG_GUI_SessionsLabels?1.0:0.0);
+   GlobalVariableSet(RG_GUI_PrefKey("SESS_OPEN"),g_RG_GUI_SessionsOpen?1.0:0.0);
+}
+
+void RG_GUI_LoadToolsPreferences()
+{
+   string k;
+
+   k=RG_GUI_PrefKey("TOOLS_OPEN");
+   if(GlobalVariableCheck(k)) g_RG_GUI_ToolsOpen=(GlobalVariableGet(k)>0.5);
+   k=RG_GUI_PrefKey("SPECIAL_OPEN");
+   if(GlobalVariableCheck(k)) g_RG_GUI_SpecialTimesOpen=(GlobalVariableGet(k)>0.5);
+   k=RG_GUI_PrefKey("NEWS_OPEN");
+   if(GlobalVariableCheck(k)) g_RG_GUI_NewsOpen=(GlobalVariableGet(k)>0.5);
+   k=RG_GUI_PrefKey("NEWS_ENABLED");
+   if(GlobalVariableCheck(k)) g_RG_GUI_NewsEnabled=(GlobalVariableGet(k)>0.5);
+   k=RG_GUI_PrefKey("NEWS_CURRENCY");
+   if(GlobalVariableCheck(k)) g_RG_GUI_NewsCurrencyMode=(int)MathRound(GlobalVariableGet(k));
+   k=RG_GUI_PrefKey("NEWS_IMPACT");
+   if(GlobalVariableCheck(k)) g_RG_GUI_NewsImpactMode=(int)MathRound(GlobalVariableGet(k));
+
+   k=RG_GUI_PrefKey("SESS_ENABLED");
+   if(GlobalVariableCheck(k)) g_RG_GUI_SessionsEnabled=(GlobalVariableGet(k)>0.5);
+   k=RG_GUI_PrefKey("SESS_CURRENT");
+   if(GlobalVariableCheck(k)) g_RG_GUI_SessionsCurrent=(GlobalVariableGet(k)>0.5);
+   k=RG_GUI_PrefKey("SESS_FUTURE");
+   if(GlobalVariableCheck(k)) g_RG_GUI_SessionsFuture=(int)MathRound(GlobalVariableGet(k));
+   if(g_RG_GUI_SessionsFuture<0) g_RG_GUI_SessionsFuture=0;
+   if(g_RG_GUI_SessionsFuture>5) g_RG_GUI_SessionsFuture=5;
+   k=RG_GUI_PrefKey("SESS_LABELS");
+   if(GlobalVariableCheck(k)) g_RG_GUI_SessionsLabels=(GlobalVariableGet(k)>0.5);
+   k=RG_GUI_PrefKey("SESS_OPEN");
+   if(GlobalVariableCheck(k)) g_RG_GUI_SessionsOpen=(GlobalVariableGet(k)>0.5);
+}
+
 struct RGSessionOccurrence
 {
    string name;
@@ -434,14 +496,14 @@ void RG_GUI_CreateSessionLabel(string name,string text,datetime when,double pric
 }
 
 
-bool RG_GUI_GetLast120M15Range(double &rangeHigh,double &rangeLow)
+bool RG_GUI_GetLast120H4Range(double &rangeHigh,double &rangeLow)
 {
    rangeHigh=0.0;
    rangeLow=0.0;
 
    const int count=120;
-   const int startShift=1; // completed M15 candles only
-   int bars=iBars(Symbol(),PERIOD_M15);
+   const int startShift=1; // completed H4 candles only
+   int bars=iBars(Symbol(),PERIOD_H4);
    if(bars<=startShift) return(false);
 
    int available=bars-startShift;
@@ -449,12 +511,12 @@ bool RG_GUI_GetLast120M15Range(double &rangeHigh,double &rangeLow)
    if(useCount>count) useCount=count;
    if(useCount<=0) return(false);
 
-   int hiShift=iHighest(Symbol(),PERIOD_M15,MODE_HIGH,useCount,startShift);
-   int loShift=iLowest(Symbol(),PERIOD_M15,MODE_LOW,useCount,startShift);
+   int hiShift=iHighest(Symbol(),PERIOD_H4,MODE_HIGH,useCount,startShift);
+   int loShift=iLowest(Symbol(),PERIOD_H4,MODE_LOW,useCount,startShift);
    if(hiShift<0 || loShift<0) return(false);
 
-   double hi=iHigh(Symbol(),PERIOD_M15,hiShift);
-   double lo=iLow(Symbol(),PERIOD_M15,loShift);
+   double hi=iHigh(Symbol(),PERIOD_H4,hiShift);
+   double lo=iLow(Symbol(),PERIOD_H4,loShift);
    if(hi<=0.0 || lo<=0.0 || hi<lo) return(false);
 
    rangeHigh=hi;
@@ -559,7 +621,7 @@ void RG_GUI_DrawMarketSessions()
    // for every session so the boxes remain visually comparable.
    double rangeHigh=0.0;
    double rangeLow=0.0;
-   if(!RG_GUI_GetLast120M15Range(rangeHigh,rangeLow)) return;
+   if(!RG_GUI_GetLast120H4Range(rangeHigh,rangeLow)) return;
 
    double sessionRange=rangeHigh-rangeLow;
    if(sessionRange<=0.0) return;
@@ -569,9 +631,22 @@ void RG_GUI_DrawMarketSessions()
    double chartTop=WindowPriceMax();
    double chartBottom=WindowPriceMin();
    if(chartTop<=chartBottom) return;
-   double center=(chartTop+chartBottom)/2.0;
-   double halfHeight=sessionRange/2.0;
 
+   double chartRange=chartTop-chartBottom;
+   double margin=chartRange*0.06;
+   double usableRange=chartRange-(2.0*margin);
+   if(usableRange<=0.0) return;
+
+   // Keep the H4/120 range as the requested height.  If the current chart
+   // viewport is too short to contain it, cap only the drawing height so the
+   // frame and its label remain visible instead of disappearing off-screen.
+   if(sessionRange>usableRange)
+      sessionRange=usableRange;
+
+   double halfHeight=sessionRange/2.0;
+   double center=(chartTop+chartBottom)/2.0;
+
+   // Labels are placed just inside the upper border of the session frame.
    for(int i=0;i<selectedCount;i++)
    {
       RGSessionOccurrence q=selected[i];
@@ -592,7 +667,7 @@ void RG_GUI_DrawMarketSessions()
          string cap=q.name;
          if(q.current) cap+="  NOW";
          else cap+="  NEXT";
-         RG_GUI_CreateSessionLabel(base+"LABEL",cap,q.startTime,top,q.lineColor);
+         RG_GUI_CreateSessionLabel(base+"LABEL",cap,q.startTime,top-(chartRange*0.006),q.lineColor);
       }
    }
    ChartRedraw();
@@ -1098,6 +1173,9 @@ void RG_NewsUiChanged()
 
 #define RG_GUI_SECTION         RG_PREFIX+"OPEN_POSITIONS"
 #define RG_GUI_SECTION_TOGGLE  RG_PREFIX+"OPEN_POSITIONS_TOGGLE"
+#define RG_GUI_POS_SCROLL_TRACK RG_PREFIX+"OPEN_POSITIONS_SCROLL_TRACK"
+#define RG_GUI_POS_SCROLL_THUMB RG_PREFIX+"OPEN_POSITIONS_SCROLL_THUMB"
+#define RG_GUI_POS_SCROLL_W 12
 #define RG_GUI_SYMBOL          RG_PREFIX+"SYMBOL"
 #define RG_GUI_SPREAD          RG_PREFIX+"SPREAD"
 #define RG_GUI_PROFIT          RG_PREFIX+"PROFIT"
@@ -1201,6 +1279,8 @@ int RG_GUI_FS(int base);
 int  g_RG_GUI_LastChartWidth=0;
 int  g_RG_GUI_LastPositionCount=-1;
 int  g_RG_GUI_LastPositionTickets[8];
+int  g_RG_GUI_PositionScroll=0;
+#define RG_GUI_VISIBLE_POSITION_ROWS 3
 
 //====================================================
 // Runtime panel position / drag state
@@ -1463,8 +1543,8 @@ void RG_GUI_CalculateLayout(
    if(rowCount<1)
       rowCount=1;
 
-   if(rowCount>8)
-      rowCount=8;
+   if(rowCount>RG_GUI_VISIBLE_POSITION_ROWS)
+      rowCount=RG_GUI_VISIBLE_POSITION_ROWS;
 
    L.contentW=
       w-(2*RG_GUI_PAD);
@@ -2558,6 +2638,22 @@ void RG_GUI_RebuildPositionRows(
 {
    RG_GUI_DeletePositionObjects();
 
+   if(maxRows<1)
+      maxRows=1;
+   if(maxRows>RG_GUI_VISIBLE_POSITION_ROWS)
+      maxRows=RG_GUI_VISIBLE_POSITION_ROWS;
+
+   int total=RG_GUI_GetPositionCount();
+   int maxScroll=total-RG_GUI_VISIBLE_POSITION_ROWS;
+   if(maxScroll<0)
+      maxScroll=0;
+
+   if(g_RG_GUI_PositionScroll<0)
+      g_RG_GUI_PositionScroll=0;
+   if(g_RG_GUI_PositionScroll>maxScroll)
+      g_RG_GUI_PositionScroll=maxScroll;
+
+   int skipped=0;
    int row=0;
 
    for(int i=OrdersTotal()-1;
@@ -2569,6 +2665,12 @@ void RG_GUI_RebuildPositionRows(
 
       if(!RG_GUI_IsManagedOrder())
          continue;
+
+      if(skipped<g_RG_GUI_PositionScroll)
+      {
+         skipped++;
+         continue;
+      }
 
       RG_GUI_DrawPositionRow(
          OrderTicket(),
@@ -2589,6 +2691,23 @@ bool RG_GUI_PositionStructureChanged(int maxRows)
 
    ArrayInitialize(tickets,-1);
 
+   if(maxRows<1)
+      maxRows=1;
+   if(maxRows>RG_GUI_VISIBLE_POSITION_ROWS)
+      maxRows=RG_GUI_VISIBLE_POSITION_ROWS;
+
+   int total=RG_GUI_GetPositionCount();
+   int maxScroll=total-RG_GUI_VISIBLE_POSITION_ROWS;
+   if(maxScroll<0)
+      maxScroll=0;
+
+   if(g_RG_GUI_PositionScroll>maxScroll)
+      g_RG_GUI_PositionScroll=maxScroll;
+   if(g_RG_GUI_PositionScroll<0)
+      g_RG_GUI_PositionScroll=0;
+
+   int skipped=0;
+
    for(int i=OrdersTotal()-1;
        i>=0 && count<maxRows;
        i--)
@@ -2598,6 +2717,12 @@ bool RG_GUI_PositionStructureChanged(int maxRows)
 
       if(!RG_GUI_IsManagedOrder())
          continue;
+
+      if(skipped<g_RG_GUI_PositionScroll)
+      {
+         skipped++;
+         continue;
+      }
 
       tickets[count]=OrderTicket();
       count++;
@@ -2621,6 +2746,23 @@ void RG_GUI_CachePositionStructure(int maxRows)
    for(int k=0;k<8;k++)
       g_RG_GUI_LastPositionTickets[k]=-1;
 
+   if(maxRows<1)
+      maxRows=1;
+   if(maxRows>RG_GUI_VISIBLE_POSITION_ROWS)
+      maxRows=RG_GUI_VISIBLE_POSITION_ROWS;
+
+   int total=RG_GUI_GetPositionCount();
+   int maxScroll=total-RG_GUI_VISIBLE_POSITION_ROWS;
+   if(maxScroll<0)
+      maxScroll=0;
+
+   if(g_RG_GUI_PositionScroll>maxScroll)
+      g_RG_GUI_PositionScroll=maxScroll;
+   if(g_RG_GUI_PositionScroll<0)
+      g_RG_GUI_PositionScroll=0;
+
+   int skipped=0;
+
    for(int i=OrdersTotal()-1;
        i>=0 && g_RG_GUI_LastPositionCount<maxRows;
        i--)
@@ -2630,6 +2772,12 @@ void RG_GUI_CachePositionStructure(int maxRows)
 
       if(!RG_GUI_IsManagedOrder())
          continue;
+
+      if(skipped<g_RG_GUI_PositionScroll)
+      {
+         skipped++;
+         continue;
+      }
 
       g_RG_GUI_LastPositionTickets[g_RG_GUI_LastPositionCount]=OrderTicket();
       g_RG_GUI_LastPositionCount++;
@@ -2685,26 +2833,9 @@ void RG_GUI_UpdatePositionRowValues(
    {
       bool trailingOn=RG_TrailingIsEnabled(ticket);
 
-      ObjectSetInteger(
-         0,
-         RG_GUI_PosTrailing(ticket),
-         OBJPROP_BGCOLOR,
-         (trailingOn ? RG_GUI_GREEN : RG_GUI_YELLOW)
-      );
-
-      ObjectSetInteger(
-         0,
-         RG_GUI_PosTrailing(ticket),
-         OBJPROP_COLOR,
-         clrBlack
-      );
-
-      ObjectSetString(
-         0,
-         RG_GUI_PosTrailing(ticket),
-         OBJPROP_TEXT,
-         (trailingOn ? "TR ON" : "TR")
-      );
+      ObjectSetInteger(0,RG_GUI_PosTrailing(ticket),OBJPROP_BGCOLOR,(trailingOn ? RG_GUI_GREEN : RG_GUI_YELLOW));
+      ObjectSetInteger(0,RG_GUI_PosTrailing(ticket),OBJPROP_COLOR,clrBlack);
+      ObjectSetString(0,RG_GUI_PosTrailing(ticket),OBJPROP_TEXT,(trailingOn ? "TR ON" : "TR"));
    }
 }
 
@@ -2716,8 +2847,8 @@ void RG_GUI_UpdatePositionRows(
 {
    if(maxRows<1)
       maxRows=1;
-   if(maxRows>8)
-      maxRows=8;
+   if(maxRows>RG_GUI_VISIBLE_POSITION_ROWS)
+      maxRows=RG_GUI_VISIBLE_POSITION_ROWS;
 
    if(RG_GUI_PositionStructureChanged(maxRows))
    {
@@ -2735,6 +2866,196 @@ void RG_GUI_UpdatePositionRows(
             ticket,row,x,y+(row*RG_GUI_ROW_H),width
          );
    }
+}
+
+// Scroll the fixed-height OPEN POSITIONS viewport.
+void RG_GUI_ScrollPositions(int direction)
+{
+   if(!g_RG_GUI_PanelExpanded || !g_RG_GUI_PositionsExpanded)
+      return;
+
+   int total=RG_GUI_GetPositionCount();
+   int maxScroll=total-RG_GUI_VISIBLE_POSITION_ROWS;
+   if(maxScroll<0)
+      maxScroll=0;
+
+   if(direction>0)
+      g_RG_GUI_PositionScroll++;
+   else
+   if(direction<0)
+      g_RG_GUI_PositionScroll--;
+
+   if(g_RG_GUI_PositionScroll<0)
+      g_RG_GUI_PositionScroll=0;
+   if(g_RG_GUI_PositionScroll>maxScroll)
+      g_RG_GUI_PositionScroll=maxScroll;
+
+   RG_GUI_UpdatePositionSectionLayout();
+   ChartRedraw();
+}
+
+bool RG_GUI_HandlePositionMouseWheel(int mouseX,int mouseY,int delta)
+{
+   return(false);
+}
+
+
+void RG_GUI_DeletePositionScrollbar()
+{
+   if(ObjectFind(0,RG_GUI_POS_SCROLL_TRACK)>=0)
+      ObjectDelete(0,RG_GUI_POS_SCROLL_TRACK);
+   if(ObjectFind(0,RG_GUI_POS_SCROLL_THUMB)>=0)
+      ObjectDelete(0,RG_GUI_POS_SCROLL_THUMB);
+}
+
+void RG_GUI_UpdatePositionScrollbar(int x,int y,int height,int count)
+{
+   if(count<=RG_GUI_VISIBLE_POSITION_ROWS || !g_RG_GUI_PositionsExpanded || height<=0)
+   {
+      RG_GUI_DeletePositionScrollbar();
+      return;
+   }
+
+   int sw=RG_GUI_S(RG_GUI_POS_SCROLL_W);
+   if(sw<8) sw=8;
+
+   int trackX=x-sw;
+   int trackY=y;
+   int trackH=height;
+
+   RG_GUI_CreateRect(
+      RG_GUI_POS_SCROLL_TRACK,
+      trackX,
+      trackY,
+      sw,
+      trackH,
+      RG_GUI_HEADER_BG,
+      RG_GUI_BORDER,
+      RG_GUI_Z_BUTTON+4
+   );
+
+   int minThumb=RG_GUI_S(24);
+   if(minThumb<18) minThumb=18;
+
+   int thumbH=(trackH*RG_GUI_VISIBLE_POSITION_ROWS)/count;
+   if(thumbH<minThumb) thumbH=minThumb;
+   if(thumbH>trackH) thumbH=trackH;
+
+   int maxTravel=trackH-thumbH;
+   int maxScroll=count-RG_GUI_VISIBLE_POSITION_ROWS;
+   if(maxScroll<1) maxScroll=1;
+
+   int thumbY=trackY+(maxTravel*g_RG_GUI_PositionScroll)/maxScroll;
+
+   RG_GUI_CreateRect(
+      RG_GUI_POS_SCROLL_THUMB,
+      trackX,
+      thumbY,
+      sw,
+      thumbH,
+      RG_GUI_YELLOW,
+      RG_GUI_YELLOW,
+      RG_GUI_Z_BUTTON+6
+   );
+
+   ObjectSetInteger(0,RG_GUI_POS_SCROLL_TRACK,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,RG_GUI_POS_SCROLL_TRACK,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,RG_GUI_POS_SCROLL_TRACK,OBJPROP_HIDDEN,true);
+
+   ObjectSetInteger(0,RG_GUI_POS_SCROLL_THUMB,OBJPROP_SELECTABLE,true);
+   ObjectSetInteger(0,RG_GUI_POS_SCROLL_THUMB,OBJPROP_SELECTED,false);
+   ObjectSetInteger(0,RG_GUI_POS_SCROLL_THUMB,OBJPROP_HIDDEN,false);
+}
+
+bool RG_GUI_HandlePositionScrollbarDrag(string objectName)
+{
+   if(objectName!=RG_GUI_POS_SCROLL_THUMB)
+      return(false);
+
+   if(ObjectFind(0,RG_GUI_POS_SCROLL_THUMB)<0)
+      return(false);
+
+   int count=RG_GUI_GetPositionCount();
+   if(count<=RG_GUI_VISIBLE_POSITION_ROWS)
+      return(false);
+
+   int w=RG_GUI_GetPanelWidth();
+   int x=RG_GUI_GetPanelX(w);
+   int y=RG_GUI_GetPanelY();
+   int rows=count;
+   if(rows<1) rows=1;
+   if(rows>RG_GUI_VISIBLE_POSITION_ROWS) rows=RG_GUI_VISIBLE_POSITION_ROWS;
+
+   RGGuiLayout L;
+   RG_GUI_CalculateLayout(x,y,w,rows,g_RG_GUI_PositionsExpanded,L);
+
+   int sw=RG_GUI_S(RG_GUI_POS_SCROLL_W);
+   if(sw<8) sw=8;
+   int trackH=L.rowsHeight;
+   if(trackH<=0) return(false);
+
+   int thumbH=(trackH*RG_GUI_VISIBLE_POSITION_ROWS)/count;
+   int minThumb=RG_GUI_S(24);
+   if(minThumb<18) minThumb=18;
+   if(thumbH<minThumb) thumbH=minThumb;
+   if(thumbH>trackH) thumbH=trackH;
+
+   int maxTravel=trackH-thumbH;
+   int maxScroll=count-RG_GUI_VISIBLE_POSITION_ROWS;
+   if(maxScroll<1) maxScroll=1;
+
+   int thumbY=(int)ObjectGetInteger(0,RG_GUI_POS_SCROLL_THUMB,OBJPROP_YDISTANCE);
+   int minY=L.rowsY;
+   int maxY=minY+maxTravel;
+
+   if(thumbY<minY) thumbY=minY;
+   if(thumbY>maxY) thumbY=maxY;
+
+   int scroll=0;
+   if(maxTravel>0)
+      scroll=(int)MathRound((double)(thumbY-minY)*maxScroll/(double)maxTravel);
+
+   if(scroll<0) scroll=0;
+   if(scroll>maxScroll) scroll=maxScroll;
+
+   g_RG_GUI_PositionScroll=scroll;
+   RG_GUI_UpdatePositionSectionLayout();
+   ChartRedraw();
+   return(true);
+}
+
+bool RG_GUI_HandlePositionScrollbarClick(int mouseY)
+{
+   if(ObjectFind(0,RG_GUI_POS_SCROLL_TRACK)<0)
+      return(false);
+
+   int count=RG_GUI_GetPositionCount();
+   if(count<=RG_GUI_VISIBLE_POSITION_ROWS)
+      return(false);
+
+   int trackY=(int)ObjectGetInteger(0,RG_GUI_POS_SCROLL_TRACK,OBJPROP_YDISTANCE);
+   int trackH=(int)ObjectGetInteger(0,RG_GUI_POS_SCROLL_TRACK,OBJPROP_YSIZE);
+   int thumbY=(int)ObjectGetInteger(0,RG_GUI_POS_SCROLL_THUMB,OBJPROP_YDISTANCE);
+   int thumbH=(int)ObjectGetInteger(0,RG_GUI_POS_SCROLL_THUMB,OBJPROP_YSIZE);
+
+   if(mouseY>=thumbY && mouseY<thumbY+thumbH)
+      return(true);
+
+   int maxScroll=count-RG_GUI_VISIBLE_POSITION_ROWS;
+   int page=RG_GUI_VISIBLE_POSITION_ROWS;
+
+   if(mouseY<thumbY)
+      g_RG_GUI_PositionScroll-=page;
+   else
+   if(mouseY>thumbY+thumbH)
+      g_RG_GUI_PositionScroll+=page;
+
+   if(g_RG_GUI_PositionScroll<0) g_RG_GUI_PositionScroll=0;
+   if(g_RG_GUI_PositionScroll>maxScroll) g_RG_GUI_PositionScroll=maxScroll;
+
+   RG_GUI_UpdatePositionSectionLayout();
+   ChartRedraw();
+   return(true);
 }
 
 //====================================================
@@ -3729,12 +4050,8 @@ void RG_GUI_UpdatePositionSectionLayout()
       RG_GUI_GetPositionCount();
 
    int rows=count;
-
-   if(rows<1)
-      rows=1;
-
-   if(rows>8)
-      rows=8;
+   if(rows<1) rows=1;
+   if(rows>RG_GUI_VISIBLE_POSITION_ROWS) rows=RG_GUI_VISIBLE_POSITION_ROWS;
 
    RGGuiLayout L;
 
@@ -3962,12 +4279,7 @@ void RG_GUI_UpdatePositionSectionLayout()
          L.positionY
       );
 
-      ObjectSetInteger(
-         0,
-         RG_GUI_SECTION_TOGGLE,
-         OBJPROP_XSIZE,
-         w-(2*RG_GUI_PAD)
-      );
+      ObjectSetInteger(0,RG_GUI_SECTION_TOGGLE,OBJPROP_XSIZE,w-(2*RG_GUI_PAD));
 
       ObjectSetInteger(
          0,
@@ -3979,16 +4291,33 @@ void RG_GUI_UpdatePositionSectionLayout()
 
    if(g_RG_GUI_PositionsExpanded)
    {
+      int rowWidth=w-(2*RG_GUI_PAD);
+      if(count>RG_GUI_VISIBLE_POSITION_ROWS)
+      {
+         int sbw=RG_GUI_S(RG_GUI_POS_SCROLL_W);
+         if(sbw<8) sbw=8;
+         rowWidth-=sbw+RG_GUI_S(4);
+      }
+      if(rowWidth<100) rowWidth=100;
+
       RG_GUI_UpdatePositionRows(
          x+RG_GUI_PAD,
          L.rowsY,
-         w-(2*RG_GUI_PAD),
+         rowWidth,
          rows
+      );
+
+      RG_GUI_UpdatePositionScrollbar(
+         x+RG_GUI_PAD+(w-(2*RG_GUI_PAD)),
+         L.rowsY,
+         L.rowsHeight,
+         count
       );
    }
    else if(g_RG_GUI_LastPositionCount!=-1)
    {
       RG_GUI_DeletePositionObjects();
+      RG_GUI_DeletePositionScrollbar();
       g_RG_GUI_LastPositionCount=0;
    }
 }
@@ -4059,6 +4388,9 @@ void RG_GUI_TogglePositions()
 {
    g_RG_GUI_PositionsExpanded=
       !g_RG_GUI_PositionsExpanded;
+
+   if(!g_RG_GUI_PositionsExpanded)
+      g_RG_GUI_PositionScroll=0;
 
    RG_GUI_UpdatePositionSectionLayout();
    RG_UpdateFooter();
@@ -4145,12 +4477,14 @@ void RG_GUI_CreateToolsSessionsPanel(int x,int y,int w)
 void RG_GUI_ToggleSessionsSection()
 {
    g_RG_GUI_SessionsOpen=!g_RG_GUI_SessionsOpen;
+   RG_GUI_SaveToolsPreferences();
    RG_CreatePanel();
 }
 
 void RG_GUI_ToggleSessionsEnabled()
 {
    g_RG_GUI_SessionsEnabled=!g_RG_GUI_SessionsEnabled;
+   RG_GUI_SaveToolsPreferences();
    if(!g_RG_GUI_SessionsEnabled)
       RG_GUI_DeleteSessionObjects();
    else
@@ -4162,6 +4496,7 @@ void RG_GUI_ToggleSessionsEnabled()
 void RG_GUI_ToggleSessionsCurrent()
 {
    g_RG_GUI_SessionsCurrent=!g_RG_GUI_SessionsCurrent;
+   RG_GUI_SaveToolsPreferences();
    RG_GUI_DrawMarketSessions();
    RG_GUI_UpdateToolsPanel();
    ChartRedraw();
@@ -4172,6 +4507,7 @@ void RG_GUI_CycleSessionsFuture()
    g_RG_GUI_SessionsFuture++;
    if(g_RG_GUI_SessionsFuture>5)
       g_RG_GUI_SessionsFuture=0;
+   RG_GUI_SaveToolsPreferences();
    RG_GUI_DrawMarketSessions();
    RG_GUI_UpdateToolsPanel();
    ChartRedraw();
@@ -4180,6 +4516,7 @@ void RG_GUI_CycleSessionsFuture()
 void RG_GUI_ToggleSessionsLabels()
 {
    g_RG_GUI_SessionsLabels=!g_RG_GUI_SessionsLabels;
+   RG_GUI_SaveToolsPreferences();
    RG_GUI_DrawMarketSessions();
    RG_GUI_UpdateToolsPanel();
    ChartRedraw();
@@ -4460,6 +4797,7 @@ void RG_GUI_RefreshNewsPanel()
 void RG_GUI_ToggleNews()
 {
    g_RG_GUI_NewsEnabled=!g_RG_GUI_NewsEnabled;
+   RG_GUI_SaveToolsPreferences();
    RG_GUI_RefreshNewsPanel();
    RG_NewsUiChanged();
 }
@@ -4467,6 +4805,7 @@ void RG_GUI_ToggleNewsPanel()
 {
    g_RG_GUI_NewsTimeframe=1;
    g_RG_GUI_NewsOpen=!g_RG_GUI_NewsOpen;
+   RG_GUI_SaveToolsPreferences();
    g_RG_GUI_NewsSelector=0;
    RG_GUI_RefreshNewsPanel();
    RG_NewsUiChanged();
@@ -4489,12 +4828,13 @@ void RG_GUI_SelectNewsTimeframe(int index)
 void RG_GUI_ToggleNewsCurrency(int index)
 {
    if(index<0 || index>8) return;
-   if(index==8) { g_RG_GUI_NewsCurrencyMode=255; RG_GUI_RefreshNewsPanel();
+   if(index==8) { g_RG_GUI_NewsCurrencyMode=255; RG_GUI_SaveToolsPreferences(); RG_GUI_RefreshNewsPanel();
    RG_NewsUiChanged(); return; }
    if(g_RG_GUI_NewsCurrencyMode==255) g_RG_GUI_NewsCurrencyMode=0;
    int bit=(1<<index);
    if((g_RG_GUI_NewsCurrencyMode & bit)!=0) g_RG_GUI_NewsCurrencyMode &= ~bit;
    else g_RG_GUI_NewsCurrencyMode |= bit;
+   RG_GUI_SaveToolsPreferences();
    RG_GUI_RefreshNewsPanel();
    RG_NewsUiChanged();
 }
@@ -4517,6 +4857,7 @@ void RG_GUI_SelectNewsImpact(int index)
       g_RG_GUI_NewsImpactMode |= bit;
    if(g_RG_GUI_NewsImpactMode==0)
       g_RG_GUI_NewsImpactMode=bit;
+   RG_GUI_SaveToolsPreferences();
    RG_GUI_RefreshNewsPanel();
    RG_NewsUiChanged();
 }
@@ -5003,6 +5344,7 @@ void RG_GUI_CreateToolsPanel()
 void RG_GUI_ToggleSpecialTimes()
 {
    g_RG_GUI_SpecialTimesOpen=!g_RG_GUI_SpecialTimesOpen;
+   RG_GUI_SaveToolsPreferences();
    RG_CreatePanel();
 
    // Rebuilds delete chart objects, including cached News labels.
@@ -5013,6 +5355,7 @@ void RG_GUI_ToggleSpecialTimes()
 void RG_GUI_ToggleTools()
 {
    g_RG_GUI_ToolsOpen=!g_RG_GUI_ToolsOpen;
+   RG_GUI_SaveToolsPreferences();
    RG_CreatePanel();
 }
 
@@ -5246,12 +5589,8 @@ bool RG_CreatePanel()
       RG_GUI_GetPositionCount();
 
    int rows=count;
-
-   if(rows<1)
-      rows=1;
-
-   if(rows>8)
-      rows=8;
+   if(rows<1) rows=1;
+   if(rows>RG_GUI_VISIBLE_POSITION_ROWS) rows=RG_GUI_VISIBLE_POSITION_ROWS;
 
    RGGuiLayout L;
 
@@ -5668,6 +6007,9 @@ bool RG_CreatePanel()
       RG_GUI_YELLOW,
       RG_GUI_Z_BUTTON
    );
+
+   // Scrollbar is drawn in the fixed-height position viewport.
+
 
    //=================================================
    // MARKET / ACCOUNT INFORMATION

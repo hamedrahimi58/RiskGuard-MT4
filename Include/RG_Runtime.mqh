@@ -148,6 +148,35 @@ void RG_RuntimeClearPreviewSnapshot()
 }
 
 //====================================================
+// PIP helpers for user-configured distance Inputs
+//====================================================
+// All user-facing distance Inputs are PIPs. Runtime keeps SL/TP
+// internally as broker POINTS for compatibility with existing sizing/trade code.
+double RG_RuntimePipSize()
+{
+   double point=MarketInfo(Symbol(),MODE_POINT);
+   int digits=(int)MarketInfo(Symbol(),MODE_DIGITS);
+   if(point<=0.0) return(0.0);
+   return((digits==3 || digits==5) ? point*10.0 : point);
+}
+
+int RG_RuntimePipsToPoints(double pips)
+{
+   double pip=RG_RuntimePipSize();
+   double point=MarketInfo(Symbol(),MODE_POINT);
+   if(pips<=0.0 || pip<=0.0 || point<=0.0) return(0);
+   return((int)MathRound((pips*pip)/point));
+}
+
+double RG_RuntimePointsToPips(double points)
+{
+   double pip=RG_RuntimePipSize();
+   double point=MarketInfo(Symbol(),MODE_POINT);
+   if(points<0.0 || pip<=0.0 || point<=0.0) return(0.0);
+   return(points*point/pip);
+}
+
+//====================================================
 // Init
 //====================================================
 
@@ -187,6 +216,8 @@ void RG_RuntimeSyncInputDefaults()
    // This keeps runtime consumers independent from stale cached values.
    g_RG_MaxOpenPositions=MaxOpenPositions;
    g_RG_MaxLot=MaxLot;
+   g_RG_StopLoss=RG_RuntimePipsToPoints(StopLossPips);
+   g_RG_TakeProfit=RG_RuntimePipsToPoints(TakeProfitPips);
    g_RG_RiskFreeTriggerPips=RiskFreeTriggerPips;
    g_RG_UseStopLoss=UseStopLoss;
    g_RG_UseTakeProfit=UseTakeProfit;
@@ -222,8 +253,8 @@ void RG_RuntimeInit()
    g_RG_RiskPercentValue = 1.0;
    g_RG_RiskDollarValue  = 5.0;
    g_RG_RiskValue  = (g_RG_RiskMode==RG_RISK_PERCENT ? g_RG_RiskPercentValue : (g_RG_RiskMode==RG_RISK_DOLLAR ? g_RG_RiskDollarValue : FixedLot));
-   g_RG_StopLoss   = StopLoss;
-   g_RG_TakeProfit = TakeProfit;
+   g_RG_StopLoss   = RG_RuntimePipsToPoints(StopLossPips);
+   g_RG_TakeProfit = RG_RuntimePipsToPoints(TakeProfitPips);
    g_RG_MaxOpenPositions = MaxOpenPositions;
    g_RG_MaxLot = MaxLot;
    g_RG_RiskFreeTriggerPips = RiskFreeTriggerPips;
@@ -592,7 +623,7 @@ bool RG_RuntimeApplyPreview(
 // Legacy-compatible GUI apply
 //
 // Kept for compatibility with existing modules.
-// These values are interpreted as POINT distances.
+// These values are interpreted as PIP distances.
 //====================================================
 
 bool RG_RuntimeApplyGUI(
@@ -615,7 +646,7 @@ bool RG_RuntimeApplyGUI(
       int sl=(int)StringToInteger(slText);
 
       if(sl>=0)
-         g_RG_StopLoss=sl;
+         g_RG_StopLoss=RG_RuntimePipsToPoints(sl);
    }
 
    if(StringLen(tpText)>0)
@@ -623,7 +654,7 @@ bool RG_RuntimeApplyGUI(
       int tp=(int)StringToInteger(tpText);
 
       if(tp>=0)
-         g_RG_TakeProfit=tp;
+         g_RG_TakeProfit=RG_RuntimePipsToPoints(tp);
    }
 
    g_RG_SettingsApplied=true;
