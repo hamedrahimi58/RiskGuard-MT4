@@ -30,6 +30,7 @@
 #include <Trade/RG_Trailing.mqh>
 #include <Trade/RG_TakeProfit.mqh>
 
+#include <RG_Journal.mqh>
 #include <RG_GUI.mqh>
 #include <RG_License.mqh>
 #include <GUI/RG_TrailingSetup.mqh>
@@ -667,6 +668,7 @@ int OnInit()
 
    RG_SpecialTimesInit();
    RG_GUI_LoadToolsPreferences();
+   RG_JournalInit();
 
    // Clear chart objects left by an older News/Session EA instance before
    // rebuilding the current panel and timeline visualization.
@@ -766,6 +768,7 @@ void OnTimer()
    RG_RuntimeSyncInputDefaults();
    RG_NewsEngineUpdate();
    RG_GUI_UpdateSessionVisualization();
+   RG_JournalUpdate();
    RG_ProcessPositionManager();
 
    RG_UpdateGUI();
@@ -795,6 +798,7 @@ void OnTick()
 
    RG_RuntimeSyncInputDefaults();
    RG_GUI_UpdateSessionVisualization();
+   RG_JournalUpdate();
    RG_ProcessPositionManager();
 
    // Manual RF is controlled by the position-row RF button.
@@ -871,6 +875,42 @@ void OnChartEvent(
    }
 
    //=================================================
+   // JOURNAL RENAME DIALOG KEYBOARD INPUT
+   //=================================================
+   if(id==CHARTEVENT_KEYDOWN)
+   {
+      if(RG_GUI_HandleJournalKeyDown(lparam,sparam))
+      {
+         if(lparam==13 && g_RG_GUI_JournalEditType>=0)
+         {
+            // Reuse the normal OK path below by committing directly here.
+            string kn=RG_JournalClean(ObjectGetString(0,RG_GUI_JV_NAMEEDIT,OBJPROP_TEXT));
+            if(kn!="")
+            {
+               if(g_RG_GUI_JournalEditIndex<0)
+               {
+                  if(g_RG_GUI_JournalEditType==0) RG_JournalAddCondition(kn);
+                  else if(g_RG_GUI_JournalEditType==1) RG_JournalAddPattern(kn);
+                  else if(g_RG_GUI_JournalEditType==2) RG_JournalAddTrigger(kn);
+               }
+               else
+               {
+                  if(g_RG_GUI_JournalEditType==0) RG_JournalRenameItem(g_RG_JournalConditions,g_RG_JournalConditionCount,g_RG_GUI_JournalEditIndex,kn);
+                  else if(g_RG_GUI_JournalEditType==1) RG_JournalRenameItem(g_RG_JournalPatterns,g_RG_JournalPatternCount,g_RG_GUI_JournalEditIndex,kn);
+                  else if(g_RG_GUI_JournalEditType==2) RG_JournalRenameItem(g_RG_JournalTriggers,g_RG_JournalTriggerCount,g_RG_GUI_JournalEditIndex,kn);
+               }
+            }
+            RG_GUI_JournalRestoreChartObjects();
+            ObjectDelete(0,RG_GUI_JV_CFG); ObjectDelete(0,RG_GUI_JV_CFG+"_T"); ObjectDelete(0,RG_GUI_JV_NAMEEDIT); ObjectDelete(0,RG_GUI_JV_OK); ObjectDelete(0,RG_GUI_JV_CANCEL); ObjectDelete(0,RG_GUI_JV_CLEAR);
+            g_RG_GUI_JournalEditIndex=-1; g_RG_GUI_JournalEditType=-1; g_RG_GUI_JournalEditFocused=false;
+            RG_CreatePanel();
+            ChartRedraw();
+         }
+         return;
+      }
+   }
+
+   //=================================================
    // OPEN POSITIONS SCROLLBAR
    //=================================================
    if(id==CHARTEVENT_OBJECT_CLICK)
@@ -906,10 +946,30 @@ void OnChartEvent(
             );
          }
 
+         if(RG_JournalPreviewIsOpen())
+         {
+            RG_GUI_RefreshJournalPreviewState();
+         }
          RG_UpdateGUI();
          RG_UpdateFooter();
          ChartRedraw();
          return;
+      }
+   }
+
+   //=================================================
+   // J-02 JOURNAL SETTINGS EDITS
+   //=================================================
+   if(id==CHARTEVENT_OBJECT_ENDEDIT)
+   {
+      for(int jsi=0;jsi<100;jsi++)
+      {
+         if(sparam==RG_GUI_JV_SCond(jsi) && jsi<g_RG_JournalConditionCount)
+         { RG_JournalRenameItem(g_RG_JournalConditions,g_RG_JournalConditionCount,jsi,ObjectGetString(0,sparam,OBJPROP_TEXT)); return; }
+         if(sparam==RG_GUI_JV_SPat(jsi) && jsi<g_RG_JournalPatternCount)
+         { RG_JournalRenameItem(g_RG_JournalPatterns,g_RG_JournalPatternCount,jsi,ObjectGetString(0,sparam,OBJPROP_TEXT)); return; }
+         if(sparam==RG_GUI_JV_STrg(jsi) && jsi<g_RG_JournalTriggerCount)
+         { RG_JournalRenameItem(g_RG_JournalTriggers,g_RG_JournalTriggerCount,jsi,ObjectGetString(0,sparam,OBJPROP_TEXT)); return; }
       }
    }
 
@@ -964,6 +1024,7 @@ void OnChartEvent(
       if(sparam==RG_GUI_TRADE_TAB)
       {
          g_RG_GUI_ToolsOpen=false;
+         g_RG_GUI_JournalTabOpen=false;
          // Persist the selected main tab so a timeframe/symbol chart
          // reinitialization restores TRADE instead of the previous tab.
          RG_GUI_SaveToolsPreferences();
@@ -973,11 +1034,169 @@ void OnChartEvent(
       if(sparam==RG_GUI_TOOLS_TAB)
       {
          g_RG_GUI_ToolsOpen=true;
+         g_RG_GUI_JournalTabOpen=false;
          // Persist the selected main tab so a timeframe/symbol chart
          // reinitialization restores TOOLS when that is the user's choice.
          RG_GUI_SaveToolsPreferences();
          RG_CreatePanel();
          return;
+      }
+       if(sparam==RG_GUI_JOURNAL_TAB)
+       {
+          RG_GUI_ToggleJournalTab();
+          return;
+       }
+      //=================================================
+      // J-02 REV2 JOURNAL CONTROLS
+      //=================================================
+      if(sparam==RG_GUI_JV_ADD)
+      {
+         g_RG_GUI_JournalEditIndex=-1;
+         g_RG_GUI_JournalEditType=g_RG_GUI_JournalConfigMode;
+         RG_GUI_CreateJournalRenameDialog();
+         ChartRedraw();
+         return;
+      }
+      if(sparam==RG_GUI_JV_NAMEEDIT)
+      {
+         g_RG_GUI_JournalEditFocused=true;
+         g_RG_GUI_JournalEditBuffer=ObjectGetString(0,RG_GUI_JV_NAMEEDIT,OBJPROP_TEXT);
+         return;
+      }
+      if(sparam==RG_GUI_JV_CLEAR)
+      {
+         g_RG_GUI_JournalEditFocused=true;
+         g_RG_GUI_JournalEditReplaceFirst=false;
+         RG_GUI_JournalSetEditText("");
+         return;
+      }
+      if(sparam==RG_GUI_JV_OK)
+      {
+         string nm=RG_JournalClean(ObjectGetString(0,RG_GUI_JV_NAMEEDIT,OBJPROP_TEXT));
+         if(nm!="")
+         {
+            if(g_RG_GUI_JournalEditIndex<0)
+            {
+               if(g_RG_GUI_JournalEditType==0) RG_JournalAddCondition(nm);
+               else if(g_RG_GUI_JournalEditType==1) RG_JournalAddPattern(nm);
+               else if(g_RG_GUI_JournalEditType==2) RG_JournalAddTrigger(nm);
+            }
+            else
+            {
+               if(g_RG_GUI_JournalEditType==0) RG_JournalRenameItem(g_RG_JournalConditions,g_RG_JournalConditionCount,g_RG_GUI_JournalEditIndex,nm);
+               else if(g_RG_GUI_JournalEditType==1) RG_JournalRenameItem(g_RG_JournalPatterns,g_RG_JournalPatternCount,g_RG_GUI_JournalEditIndex,nm);
+               else if(g_RG_GUI_JournalEditType==2) RG_JournalRenameItem(g_RG_JournalTriggers,g_RG_JournalTriggerCount,g_RG_GUI_JournalEditIndex,nm);
+            }
+         }
+         RG_GUI_JournalRestoreChartObjects();
+         ObjectDelete(0,RG_GUI_JV_CFG); ObjectDelete(0,RG_GUI_JV_CFG+"_T"); ObjectDelete(0,RG_GUI_JV_NAMEEDIT); ObjectDelete(0,RG_GUI_JV_OK); ObjectDelete(0,RG_GUI_JV_CANCEL); ObjectDelete(0,RG_GUI_JV_CLEAR);
+         g_RG_GUI_JournalEditIndex=-1; g_RG_GUI_JournalEditType=-1; g_RG_GUI_JournalEditFocused=false;
+         RG_CreatePanel();
+         ChartRedraw();
+         return;
+      }
+      if(sparam==RG_GUI_JV_CANCEL)
+      {
+         RG_GUI_JournalRestoreChartObjects();
+         ObjectDelete(0,RG_GUI_JV_CFG); ObjectDelete(0,RG_GUI_JV_CFG+"_T"); ObjectDelete(0,RG_GUI_JV_NAMEEDIT); ObjectDelete(0,RG_GUI_JV_OK); ObjectDelete(0,RG_GUI_JV_CANCEL); ObjectDelete(0,RG_GUI_JV_CLEAR);
+         g_RG_GUI_JournalEditIndex=-1; g_RG_GUI_JournalEditType=-1; g_RG_GUI_JournalEditFocused=false;
+         ChartRedraw();
+         return;
+      }
+      if(sparam==RG_GUI_JV_ON)
+      {
+         RG_JournalToggleEnabled();
+         RG_CreatePanel();
+         return;
+      }
+      if(sparam==RG_GUI_JV_CFG)
+      {
+         g_RG_GUI_JournalSettingsOpen=!g_RG_GUI_JournalSettingsOpen;
+         RG_UpdateGUI();
+         ChartRedraw();
+         return;
+      }
+      if(sparam==RG_GUI_JV_CLOSE)
+      {
+         g_RG_GUI_JournalSettingsOpen=false;
+         RG_UpdateGUI();
+         ChartRedraw();
+         return;
+      }
+      // Settings category tabs.
+      if(sparam==RG_GUI_JV_MODE+"0" || sparam==RG_GUI_JV_MODE+"1" || sparam==RG_GUI_JV_MODE+"2")
+      {
+         g_RG_GUI_JournalConfigMode=(int)StringToInteger(StringSubstr(sparam,StringLen(RG_GUI_JV_MODE)));
+         g_RG_GUI_JournalConfigPage=0;
+         RG_CreatePanel();
+         return;
+      }
+      for(int jei=0;jei<100;jei++)
+      {
+         if(sparam==RG_GUI_JV_Edit(jei))
+         {
+            g_RG_GUI_JournalEditIndex=jei;
+            g_RG_GUI_JournalEditType=g_RG_GUI_JournalConfigMode;
+            RG_GUI_CreateJournalRenameDialog();
+            ChartRedraw();
+            return;
+         }
+         if(sparam==RG_GUI_JV_Del(jei))
+         {
+            if(g_RG_GUI_JournalConfigMode==0 && jei<g_RG_JournalConditionCount) RG_JournalDeleteItem(g_RG_JournalConditions,g_RG_JournalConditionCount,jei);
+            else if(g_RG_GUI_JournalConfigMode==1 && jei<g_RG_JournalPatternCount) RG_JournalDeleteItem(g_RG_JournalPatterns,g_RG_JournalPatternCount,jei);
+            else if(g_RG_GUI_JournalConfigMode==2 && jei<g_RG_JournalTriggerCount) RG_JournalDeleteItem(g_RG_JournalTriggers,g_RG_JournalTriggerCount,jei);
+            RG_CreatePanel();
+            return;
+         }
+      }
+      if(sparam==RG_GUI_JV_PREV || sparam==RG_GUI_JV_NEXT)
+      {
+         int count=(g_RG_GUI_JournalConfigMode==0?g_RG_JournalConditionCount:(g_RG_GUI_JournalConfigMode==1?g_RG_JournalPatternCount:g_RG_JournalTriggerCount));
+         int maxPage=(count<=0?0:(count-1)/6);
+         if(sparam==RG_GUI_JV_PREV && g_RG_GUI_JournalConfigPage>0) g_RG_GUI_JournalConfigPage--;
+         if(sparam==RG_GUI_JV_NEXT && g_RG_GUI_JournalConfigPage<maxPage) g_RG_GUI_JournalConfigPage++;
+         RG_CreatePanel();
+         return;
+      }
+      // Small page controls in the preview drawer.
+      if(sparam==RG_GUI_JV_PREFIX+"PP" || sparam==RG_GUI_JV_PREFIX+"PN")
+      {
+         int maxp=(g_RG_JournalPatternCount<=0?0:(g_RG_JournalPatternCount-1)/3);
+         if(sparam==RG_GUI_JV_PREFIX+"PP" && g_RG_GUI_JournalPreviewPatPage>0) g_RG_GUI_JournalPreviewPatPage--;
+         if(sparam==RG_GUI_JV_PREFIX+"PN" && g_RG_GUI_JournalPreviewPatPage<maxp) g_RG_GUI_JournalPreviewPatPage++;
+         RG_GUI_DeleteJournalRev2Objects(); RG_GUI_CreateJournalPreviewPopup(); return;
+      }
+      if(sparam==RG_GUI_JV_PREFIX+"TPP" || sparam==RG_GUI_JV_PREFIX+"TPN")
+      {
+         int maxp=(g_RG_JournalTriggerCount<=0?0:(g_RG_JournalTriggerCount-1)/3);
+         if(sparam==RG_GUI_JV_PREFIX+"TPP" && g_RG_GUI_JournalPreviewTrgPage>0) g_RG_GUI_JournalPreviewTrgPage--;
+         if(sparam==RG_GUI_JV_PREFIX+"TPN" && g_RG_GUI_JournalPreviewTrgPage<maxp) g_RG_GUI_JournalPreviewTrgPage++;
+         RG_GUI_DeleteJournalRev2Objects(); RG_GUI_CreateJournalPreviewPopup(); return;
+      }
+      if(sparam==RG_GUI_JV_PREFIX+"CPP" || sparam==RG_GUI_JV_PREFIX+"CPN")
+      {
+         int maxp=(g_RG_JournalConditionCount<=0?0:(g_RG_JournalConditionCount-1)/3);
+         if(sparam==RG_GUI_JV_PREFIX+"CPP" && g_RG_GUI_JournalPreviewCondPage>0) g_RG_GUI_JournalPreviewCondPage--;
+         if(sparam==RG_GUI_JV_PREFIX+"CPN" && g_RG_GUI_JournalPreviewCondPage<maxp) g_RG_GUI_JournalPreviewCondPage++;
+         RG_GUI_DeleteJournalRev2Objects(); RG_GUI_CreateJournalPreviewPopup(); return;
+      }
+      for(int jpi=0;jpi<100;jpi++)
+      {
+         if(sparam==RG_GUI_JV_Pat(jpi) && jpi<g_RG_JournalPatternCount)
+         { RG_JournalTogglePattern(jpi); RG_GUI_RefreshJournalPreviewState(); ChartRedraw(); return; }
+         if(sparam==RG_GUI_JV_Trg(jpi) && jpi<g_RG_JournalTriggerCount)
+         { RG_JournalToggleTrigger(jpi); RG_GUI_RefreshJournalPreviewState(); ChartRedraw(); return; }
+      }
+      for(int jti=0;jti<9;jti++)
+      {
+         if(sparam==RG_GUI_JV_TFItem(jti))
+         { RG_JournalToggleTF(jti); RG_GUI_RefreshJournalPreviewState(); ChartRedraw(); return; }
+      }
+      for(int jci=0;jci<100;jci++)
+      {
+         if(sparam==RG_GUI_JV_Cond(jci))
+         { RG_JournalToggleCondition(jci); RG_GUI_RefreshJournalPreviewState(); ChartRedraw(); return; }
       }
       //=================================================
       // MARKET SESSIONS CONTROLS
@@ -1019,6 +1238,11 @@ void OnChartEvent(
       if(sparam==RG_GUI_NewsSectionName())
       {
          RG_GUI_ToggleNewsPanel();
+         return;
+      }
+      if(sparam==RG_GUI_JournalSectionName())
+      {
+         RG_GUI_ToggleJournal();
          return;
       }
       if(sparam==RG_GUI_NewsEnableName())
@@ -1116,6 +1340,7 @@ void OnChartEvent(
          }
 
          RG_MainStatus("BUY Preview - drag Entry / SL / TP then SET");
+         RG_JournalBeginPreview(OP_BUY);
          RG_TV_ShowPreview(OP_BUY);
          RG_GUI_UpdateRiskInfo();
          return;
@@ -1133,6 +1358,7 @@ void OnChartEvent(
          }
 
          RG_MainStatus("SELL Preview - drag Entry / SL / TP then SET");
+         RG_JournalBeginPreview(OP_SELL);
          RG_TV_ShowPreview(OP_SELL);
          RG_GUI_UpdateRiskInfo();
          return;
@@ -1234,12 +1460,15 @@ void OnChartEvent(
       // CANCEL = clear preview, no order
       if(sparam==RG_GUI_CANCEL)
       {
+         RG_JournalEndPreview();
          RG_ClearPendingMode();
          RG_RuntimeClearPreview();
          RG_RuntimeClearPreviewSnapshot();
          RG_ClearMainPreviewState();
          RG_TrailingSetupClose();
-   RG_TV_DeleteTradeVisualization();
+         RG_TV_DeleteTradeVisualization();
+         RG_GUI_DeleteJournalRev2Objects();
+         RG_CreatePanel();
 
          RG_SetEditText(
             RG_GUI_ENTRY_INPUT,
@@ -1338,6 +1567,12 @@ void OnChartEvent(
 
             if(ticket>0)
             {
+               if(RG_JournalEnabled())
+               {
+                  if(OrderSelect(ticket,SELECT_BY_TICKET,MODE_TRADES))
+                     RG_JournalAttachEntryMeta(ticket,OrderOpenPrice(),OrderStopLoss(),OrderTakeProfit(),OrderLots());
+               }
+               RG_JournalEndPreview();
                RG_RuntimeClearPreview();
                RG_RuntimeClearPreviewSnapshot();
                RG_ClearMainPreviewState();
@@ -1374,6 +1609,12 @@ void OnChartEvent(
 
             if(ticket>0)
             {
+               if(RG_JournalEnabled())
+               {
+                  if(OrderSelect(ticket,SELECT_BY_TICKET,MODE_TRADES))
+                     RG_JournalAttachEntryMeta(ticket,OrderOpenPrice(),OrderStopLoss(),OrderTakeProfit(),OrderLots());
+               }
+               RG_JournalEndPreview();
                RG_RuntimeClearPreview();
                RG_RuntimeClearPreviewSnapshot();
                RG_ClearMainPreviewState();
@@ -1381,6 +1622,8 @@ void OnChartEvent(
    RG_TV_DeleteTradeVisualization();
                RG_EnableNativeTradeLevels();
                RG_ClearPendingMode();
+               RG_GUI_DeleteJournalRev2Objects();
+               RG_CreatePanel();
 
                RG_MainStatus(
                   (direction==OP_BUY ? "BUY Opened #" : "SELL Opened #")+
