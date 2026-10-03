@@ -10,7 +10,7 @@ void RG_MainStatus(string text);
 
 // Comma-separated list of licensed MT4 account numbers.
 // Add/remove account numbers here without changing the validation logic.
-#define RG_LICENSE_ACCOUNTS "180033829"
+#define RG_LICENSE_ACCOUNTS "180033829,167004725"
 #define RG_LICENSE_SERVER  ""
 
 bool RG_LicenseAccountMatches()

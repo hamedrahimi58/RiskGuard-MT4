@@ -4,6 +4,40 @@
 #include <RG_Settings.mqh>
 
 //====================================================
+// ACCOUNT-WIDE SETTINGS PERSISTENCE
+//
+// Volume and Max Open Positions are RiskGuard settings, not
+// per-symbol settings.  They are stored by account and survive
+// chart/symbol changes and terminal restarts.  Per-chart LASTINPUT
+// values let an intentional change in the MT4 Inputs dialog update
+// the shared value without allowing another chart with default Inputs
+// to overwrite it.
+//====================================================
+string RG_RuntimeAccountKey(string suffix)
+{
+   return("RG_ACCOUNT_SETTINGS_"+IntegerToString(AccountNumber())+"_"+suffix);
+}
+
+void RG_RuntimePersistFixedLot(double value)
+{
+   if(value<=0.0) return;
+   GlobalVariableSet(RG_RuntimeAccountKey("FIXED_LOT"),value);
+}
+
+void RG_RuntimePersistMaxOpenPositions(int value)
+{
+   if(value<1) return;
+   GlobalVariableSet(RG_RuntimeAccountKey("MAX_OPEN_POSITIONS"),(double)value);
+}
+
+void RG_RuntimePersistMaxLot(double value)
+{
+   if(value<=0.0) return;
+   GlobalVariableSet(RG_RuntimeAccountKey("MAX_LOT"),value);
+}
+
+
+//====================================================
 // RiskGuard MT4
 // Runtime state
 //
@@ -188,34 +222,156 @@ void RG_RuntimeResetForInputs()
    g_RG_RuntimeReady=false;
    g_RG_SettingsApplied=false;
 
-   // Explicitly invalidate the cached FixedLot whenever MT4 reinitializes
-   // the EA from the Inputs dialog. This prevents an older runtime value
-   // from surviving a parameter change.
-   g_RG_FixedLot=FixedLot;
+   string lotKey=RG_RuntimeAccountKey("FIXED_LOT");
+   string maxKey=RG_RuntimeAccountKey("MAX_OPEN_POSITIONS");
+   string lastLotKey=RG_RuntimeAccountKey("LASTINPUT_LOT_"+IntegerToString((int)ChartID()));
+   string lastMaxKey=RG_RuntimeAccountKey("LASTINPUT_MAX_"+IntegerToString((int)ChartID()));
+   string lastMaxLotKey=RG_RuntimeAccountKey("LASTINPUT_MAXLOT_"+IntegerToString((int)ChartID()));
+   string maxLotKey=RG_RuntimeAccountKey("MAX_LOT");
+
+   // FixedLot: if this chart's Input changed since its last initialization,
+   // treat that as an intentional user change and publish it account-wide.
+   // Otherwise an existing account value wins over the chart's default.
+   if(GlobalVariableCheck(lastLotKey) && MathAbs(FixedLot-GlobalVariableGet(lastLotKey))>0.0000001)
+   {
+      if(FixedLot>0.0) GlobalVariableSet(lotKey,FixedLot);
+   }
+   else if(!GlobalVariableCheck(lotKey) && FixedLot>0.0)
+   {
+      GlobalVariableSet(lotKey,FixedLot);
+   }
+
+   // MaxOpenPositions uses the same intentional-input-change rule.
+   if(GlobalVariableCheck(lastMaxKey) && MaxOpenPositions!=(int)GlobalVariableGet(lastMaxKey))
+   {
+      if(MaxOpenPositions>0) GlobalVariableSet(maxKey,(double)MaxOpenPositions);
+   }
+   else if(!GlobalVariableCheck(maxKey) && MaxOpenPositions>0)
+   {
+      GlobalVariableSet(maxKey,(double)MaxOpenPositions);
+   }
+
+   // MaxLot is also account-wide.  Only a real change in this chart's
+   // Input may publish a new value; a newly opened chart must not overwrite
+   // the account value with its default.
+   if(GlobalVariableCheck(lastMaxLotKey) && MathAbs(MaxLot-GlobalVariableGet(lastMaxLotKey))>0.0000001)
+   {
+      if(MaxLot>0.0) GlobalVariableSet(maxLotKey,MaxLot);
+   }
+   else if(!GlobalVariableCheck(maxLotKey) && MaxLot>0.0)
+   {
+      GlobalVariableSet(maxLotKey,MaxLot);
+   }
+
+   GlobalVariableSet(lastLotKey,FixedLot);
+   GlobalVariableSet(lastMaxKey,(double)MaxOpenPositions);
+   GlobalVariableSet(lastMaxLotKey,MaxLot);
+
+   if(GlobalVariableCheck(lotKey)) g_RG_FixedLot=GlobalVariableGet(lotKey);
+   else g_RG_FixedLot=FixedLot;
+
+   if(GlobalVariableCheck(maxKey)) g_RG_MaxOpenPositions=(int)MathRound(GlobalVariableGet(maxKey));
+   else g_RG_MaxOpenPositions=MaxOpenPositions;
+
+   if(GlobalVariableCheck(maxLotKey)) g_RG_MaxLot=GlobalVariableGet(maxLotKey);
+   else g_RG_MaxLot=MaxLot;
+
    g_RG_RiskMode=DefaultRiskMode;
    g_RG_RiskPercentValue=1.0;
    g_RG_RiskDollarValue=5.0;
-   g_RG_RiskValue=(DefaultRiskMode==RG_RISK_PERCENT ? g_RG_RiskPercentValue : (DefaultRiskMode==RG_RISK_DOLLAR ? g_RG_RiskDollarValue : FixedLot));
+   g_RG_RiskValue=(DefaultRiskMode==RG_RISK_PERCENT ? g_RG_RiskPercentValue : (DefaultRiskMode==RG_RISK_DOLLAR ? g_RG_RiskDollarValue : g_RG_FixedLot));
 }
 
-// Keep the runtime FixedLot synchronized with the current EA input while
-// there is no active frozen preview. This is intentionally not done during
-// a preview so Entry/SL/TP and its associated lot remain frozen.
-void RG_RuntimeSyncInputDefaults()
+// Detect a deliberate change made in this chart's Inputs and publish it
+// account-wide.  A different chart whose Inputs still contain their old
+// defaults must NOT overwrite the shared value.  After the check, every chart
+// reloads the shared account value so the panel updates without a terminal
+// restart.
+void RG_RuntimeSyncAccountInputs()
 {
-   if(g_RG_PreviewActive)
-      return;
+   string lotKey=RG_RuntimeAccountKey("FIXED_LOT");
+   string maxKey=RG_RuntimeAccountKey("MAX_OPEN_POSITIONS");
+   string lastLotKey=RG_RuntimeAccountKey("LASTINPUT_LOT_"+IntegerToString((int)ChartID()));
+   string lastMaxKey=RG_RuntimeAccountKey("LASTINPUT_MAX_"+IntegerToString((int)ChartID()));
+   string lastMaxLotKey=RG_RuntimeAccountKey("LASTINPUT_MAXLOT_"+IntegerToString((int)ChartID()));
+   string maxLotKey=RG_RuntimeAccountKey("MAX_LOT");
 
-   if(!g_RG_RuntimeReady)
+   bool lotChanged=false;
+   bool maxChanged=false;
+   bool maxLotChanged=false;
+
+   if(GlobalVariableCheck(lastLotKey))
+      lotChanged=(MathAbs(FixedLot-GlobalVariableGet(lastLotKey))>0.0000001);
+   else
+      GlobalVariableSet(lastLotKey,FixedLot);
+
+   if(GlobalVariableCheck(lastMaxKey))
+      maxChanged=(MaxOpenPositions!=(int)MathRound(GlobalVariableGet(lastMaxKey)));
+   else
+      GlobalVariableSet(lastMaxKey,(double)MaxOpenPositions);
+
+   if(GlobalVariableCheck(lastMaxLotKey))
+      maxLotChanged=(MathAbs(MaxLot-GlobalVariableGet(lastMaxLotKey))>0.0000001);
+   else
+      GlobalVariableSet(lastMaxLotKey,MaxLot);
+
+   if(lotChanged && FixedLot>0.0)
+      GlobalVariableSet(lotKey,FixedLot);
+
+   if(maxChanged && MaxOpenPositions>0)
+      GlobalVariableSet(maxKey,(double)MaxOpenPositions);
+
+   if(maxLotChanged && MaxLot>0.0)
+      GlobalVariableSet(maxLotKey,MaxLot);
+
+   // Always advance this chart's snapshots after processing the change.
+   GlobalVariableSet(lastLotKey,FixedLot);
+   GlobalVariableSet(lastMaxKey,(double)MaxOpenPositions);
+   GlobalVariableSet(lastMaxLotKey,MaxLot);
+
+   // Now consume the single account-wide source of truth.
+   if(GlobalVariableCheck(lotKey))
+      g_RG_FixedLot=GlobalVariableGet(lotKey);
+   else if(FixedLot>0.0)
    {
-      RG_RuntimeInit();
-      return;
+      g_RG_FixedLot=FixedLot;
+      GlobalVariableSet(lotKey,FixedLot);
    }
 
-   // Synchronize every operational Input, not only FixedLot.
-   // This keeps runtime consumers independent from stale cached values.
-   g_RG_MaxOpenPositions=MaxOpenPositions;
-   g_RG_MaxLot=MaxLot;
+   if(GlobalVariableCheck(maxKey))
+      g_RG_MaxOpenPositions=(int)MathRound(GlobalVariableGet(maxKey));
+   else if(MaxOpenPositions>0)
+   {
+      g_RG_MaxOpenPositions=MaxOpenPositions;
+      GlobalVariableSet(maxKey,(double)MaxOpenPositions);
+   }
+
+   if(GlobalVariableCheck(maxLotKey))
+      g_RG_MaxLot=GlobalVariableGet(maxLotKey);
+   else if(MaxLot>0.0)
+   {
+      g_RG_MaxLot=MaxLot;
+      GlobalVariableSet(maxLotKey,MaxLot);
+   }
+
+   if(g_RG_RiskMode==RG_RISK_LOT)
+      g_RG_RiskValue=g_RG_FixedLot;
+}
+
+// Account-wide values are synchronized on every timer/tick.  The remaining
+// operational Inputs stay chart-local as before.
+void RG_RuntimeSyncInputDefaults()
+{
+   RG_RuntimeInit();
+   RG_RuntimeSyncAccountInputs();
+
+   if(g_RG_PreviewActive) return;
+
+   // MaxLot is account-wide; use the synchronized shared value.
+   if(GlobalVariableCheck(RG_RuntimeAccountKey("MAX_LOT")))
+      g_RG_MaxLot=GlobalVariableGet(RG_RuntimeAccountKey("MAX_LOT"));
+   else
+      g_RG_MaxLot=MaxLot;
    g_RG_StopLoss=RG_RuntimePipsToPoints(StopLossPips);
    g_RG_TakeProfit=RG_RuntimePipsToPoints(TakeProfitPips);
    g_RG_RiskFreeTriggerPips=RiskFreeTriggerPips;
@@ -229,11 +385,6 @@ void RG_RuntimeSyncInputDefaults()
    g_RG_MagicNumber=MagicNumber;
    g_RG_AllowBuy=AllowBuy;
    g_RG_AllowSell=AllowSell;
-
-   if(MathAbs(g_RG_FixedLot-FixedLot)>0.0000001)
-      g_RG_FixedLot=FixedLot;
-
-
 }
 
 //====================================================
@@ -248,15 +399,27 @@ void RG_RuntimeInit()
    if(g_RG_RuntimeReady)
       return;
 
-   g_RG_FixedLot   = FixedLot;
+   if(GlobalVariableCheck(RG_RuntimeAccountKey("FIXED_LOT")))
+      g_RG_FixedLot=GlobalVariableGet(RG_RuntimeAccountKey("FIXED_LOT"));
+   else
+      g_RG_FixedLot=FixedLot;
+
+   if(GlobalVariableCheck(RG_RuntimeAccountKey("MAX_OPEN_POSITIONS")))
+      g_RG_MaxOpenPositions=(int)MathRound(GlobalVariableGet(RG_RuntimeAccountKey("MAX_OPEN_POSITIONS")));
+   else
+      g_RG_MaxOpenPositions=MaxOpenPositions;
+
    g_RG_RiskMode   = DefaultRiskMode;
    g_RG_RiskPercentValue = 1.0;
    g_RG_RiskDollarValue  = 5.0;
    g_RG_RiskValue  = (g_RG_RiskMode==RG_RISK_PERCENT ? g_RG_RiskPercentValue : (g_RG_RiskMode==RG_RISK_DOLLAR ? g_RG_RiskDollarValue : FixedLot));
    g_RG_StopLoss   = RG_RuntimePipsToPoints(StopLossPips);
    g_RG_TakeProfit = RG_RuntimePipsToPoints(TakeProfitPips);
-   g_RG_MaxOpenPositions = MaxOpenPositions;
-   g_RG_MaxLot = MaxLot;
+   // MaxOpenPositions is account-wide and was loaded above.
+   if(GlobalVariableCheck(RG_RuntimeAccountKey("MAX_LOT")))
+      g_RG_MaxLot = GlobalVariableGet(RG_RuntimeAccountKey("MAX_LOT"));
+   else
+      g_RG_MaxLot = MaxLot;
    g_RG_RiskFreeTriggerPips = RiskFreeTriggerPips;
    g_RG_UseStopLoss = UseStopLoss;
    g_RG_UseTakeProfit = UseTakeProfit;
@@ -288,6 +451,14 @@ void RG_RuntimeInit()
 //====================================================
 
 int RG_RuntimeMaxOpenPositions(){ RG_RuntimeInit(); return(g_RG_MaxOpenPositions); }
+
+void RG_RuntimeSetMaxOpenPositions(int value)
+{
+   RG_RuntimeInit();
+   if(value<1) return;
+   g_RG_MaxOpenPositions=value;
+   RG_RuntimePersistMaxOpenPositions(value);
+}
 double RG_RuntimeMaxLot(){ RG_RuntimeInit(); return(g_RG_MaxLot); }
 int RG_RuntimeRiskFreeTriggerPips(){ RG_RuntimeInit(); return(g_RG_RiskFreeTriggerPips); }
 bool RG_RuntimeUseStopLoss(){ RG_RuntimeInit(); return(g_RG_UseStopLoss); }
@@ -350,7 +521,10 @@ void RG_RuntimeSetRiskValue(double value)
    if(g_RG_RiskMode==RG_RISK_DOLLAR)
       g_RG_RiskDollarValue=value;
    else
+   {
       g_RG_FixedLot=value;
+      RG_RuntimePersistFixedLot(value);
+   }
 
    g_RG_RiskValue=value;
 }
@@ -382,7 +556,10 @@ void RG_RuntimeSetFixedLot(double value)
    RG_RuntimeInit();
 
    if(value>0)
+   {
       g_RG_FixedLot=value;
+      RG_RuntimePersistFixedLot(value);
+   }
 }
 
 int RG_RuntimeStopLoss()

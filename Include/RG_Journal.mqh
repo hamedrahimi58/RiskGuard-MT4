@@ -15,8 +15,14 @@
 
 #define RG_JOURNAL_MAX_ITEMS 100
 #define RG_JOURNAL_SETTINGS_FILE "RiskGuard\\Journal\\JournalSettings.csv"
+#define RG_JOURNAL_SYNC_EVENT_ID 501
+
+string g_RG_JournalSettingsVersionKey="";
+double g_RG_JournalSettingsVersion=0.0;
+bool g_RG_JournalPendingSync=false;
 
 bool g_RG_JournalReady=false;
+int g_RG_JournalLastExportError=0;
 bool g_RG_JournalEnabled=true;
 
 struct RG_JournalListItem
@@ -175,6 +181,23 @@ void RG_JournalAddDefaults()
    // their own Conditions / Patterns / Triggers.
 }
 
+void RG_JournalPublishSettingsChanged()
+{
+   if(g_RG_JournalSettingsVersionKey=="")
+      g_RG_JournalSettingsVersionKey=RG_JournalGV("SETTINGS_VERSION");
+
+   g_RG_JournalSettingsVersion=TimeLocal()+((double)GetTickCount()/1000000.0);
+   GlobalVariableSet(g_RG_JournalSettingsVersionKey,g_RG_JournalSettingsVersion);
+
+   long cid=ChartFirst();
+   while(cid>=0)
+   {
+      if(cid!=ChartID())
+         EventChartCustom(cid,RG_JOURNAL_SYNC_EVENT_ID,0,0.0,"RG_JOURNAL_SETTINGS");
+      cid=ChartNext(cid);
+   }
+}
+
 void RG_JournalSaveSettings()
 {
    int h=FileOpen(RG_JOURNAL_SETTINGS_FILE,FILE_CSV|FILE_WRITE|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
@@ -184,30 +207,67 @@ void RG_JournalSaveSettings()
    for(int j=0;j<g_RG_JournalPatternCount;j++) FileWrite(h,"P",g_RG_JournalPatterns[j].id,g_RG_JournalPatterns[j].name);
    for(int k=0;k<g_RG_JournalTriggerCount;k++) FileWrite(h,"T",g_RG_JournalTriggers[k].id,g_RG_JournalTriggers[k].name);
    FileWrite(h,"E",g_RG_JournalEnabled?1:0,"");
+   FileFlush(h);
    FileClose(h);
+   RG_JournalPublishSettingsChanged();
 }
 
 void RG_JournalLoadSettings()
 {
    RG_JournalClearLists();
    int h=FileOpen(RG_JOURNAL_SETTINGS_FILE,FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
-   if(h!=INVALID_HANDLE)
+   if(h==INVALID_HANDLE)
    {
-      if(!FileIsEnding(h)){ FileReadString(h); FileReadString(h); FileReadString(h); }
-      while(!FileIsEnding(h))
-      {
-         string typ=FileReadString(h); if(StringLen(typ)==0) break;
-         string sid=FileReadString(h); string name=FileReadString(h);
-         int id=(int)StrToInteger(sid);
-         if(typ=="C" && g_RG_JournalConditionCount<RG_JOURNAL_MAX_ITEMS){ g_RG_JournalConditions[g_RG_JournalConditionCount].id=id; g_RG_JournalConditions[g_RG_JournalConditionCount].name=RG_JournalClean(name); g_RG_JournalConditionCount++; }
-         else if(typ=="P" && g_RG_JournalPatternCount<RG_JOURNAL_MAX_ITEMS){ g_RG_JournalPatterns[g_RG_JournalPatternCount].id=id; g_RG_JournalPatterns[g_RG_JournalPatternCount].name=RG_JournalClean(name); g_RG_JournalPatternCount++; }
-         else if(typ=="T" && g_RG_JournalTriggerCount<RG_JOURNAL_MAX_ITEMS){ g_RG_JournalTriggers[g_RG_JournalTriggerCount].id=id; g_RG_JournalTriggers[g_RG_JournalTriggerCount].name=RG_JournalClean(name); g_RG_JournalTriggerCount++; }
-         else if(typ=="E") g_RG_JournalEnabled=(id!=0);
-      }
-      FileClose(h);
+      RG_JournalSaveSettings();
+      return;
    }
-   RG_JournalAddDefaults();
-   RG_JournalSaveSettings();
+
+   if(!FileIsEnding(h)){ FileReadString(h); FileReadString(h); FileReadString(h); }
+   while(!FileIsEnding(h))
+   {
+      string typ=FileReadString(h);
+      if(StringLen(typ)==0) break;
+      string sid=FileReadString(h);
+      string name=FileReadString(h);
+      int id=(int)StrToInteger(sid);
+      if(typ=="C" && g_RG_JournalConditionCount<RG_JOURNAL_MAX_ITEMS)
+      {
+         g_RG_JournalConditions[g_RG_JournalConditionCount].id=id;
+         g_RG_JournalConditions[g_RG_JournalConditionCount].name=RG_JournalClean(name);
+         g_RG_JournalConditionCount++;
+      }
+      else if(typ=="P" && g_RG_JournalPatternCount<RG_JOURNAL_MAX_ITEMS)
+      {
+         g_RG_JournalPatterns[g_RG_JournalPatternCount].id=id;
+         g_RG_JournalPatterns[g_RG_JournalPatternCount].name=RG_JournalClean(name);
+         g_RG_JournalPatternCount++;
+      }
+      else if(typ=="T" && g_RG_JournalTriggerCount<RG_JOURNAL_MAX_ITEMS)
+      {
+         g_RG_JournalTriggers[g_RG_JournalTriggerCount].id=id;
+         g_RG_JournalTriggers[g_RG_JournalTriggerCount].name=RG_JournalClean(name);
+         g_RG_JournalTriggerCount++;
+      }
+      else if(typ=="E") g_RG_JournalEnabled=(id!=0);
+   }
+   FileClose(h);
+
+   if(g_RG_JournalSettingsVersionKey=="")
+      g_RG_JournalSettingsVersionKey=RG_JournalGV("SETTINGS_VERSION");
+   if(GlobalVariableCheck(g_RG_JournalSettingsVersionKey))
+      g_RG_JournalSettingsVersion=GlobalVariableGet(g_RG_JournalSettingsVersionKey);
+}
+
+void RG_JournalHandleSettingsSync()
+{
+   if(g_RG_JournalSettingsVersionKey=="")
+      g_RG_JournalSettingsVersionKey=RG_JournalGV("SETTINGS_VERSION");
+
+   double v=GlobalVariableCheck(g_RG_JournalSettingsVersionKey) ? GlobalVariableGet(g_RG_JournalSettingsVersionKey) : 0.0;
+   if(v<=g_RG_JournalSettingsVersion) return;
+
+   g_RG_JournalPendingSync=false;
+   RG_JournalLoadSettings();
 }
 
 bool RG_JournalEnabled(){ return(g_RG_JournalEnabled); }
@@ -311,6 +371,38 @@ bool RG_JournalReadMeta(int ticket,string &pattern,string &trigger,string &tf,st
 }
 void RG_JournalDeleteMeta(int ticket){ string f=RG_JOURNAL_FOLDER+"\\Meta_"+IntegerToString(ticket)+".csv"; if(FileIsExist(f))FileDelete(f); }
 
+string RG_JournalDescriptionFile(int ticket)
+{
+   return(RG_JOURNAL_FOLDER+"\\Description_"+IntegerToString(ticket)+".txt");
+}
+
+string RG_JournalGetDescription(int ticket)
+{
+   string f=RG_JournalDescriptionFile(ticket);
+   if(!FileIsExist(f)) return("");
+   int h=FileOpen(f,FILE_TXT|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(h==INVALID_HANDLE) return("");
+   string v=FileReadString(h);
+   FileClose(h);
+   return(v);
+}
+
+void RG_JournalSetDescription(int ticket,string description)
+{
+   if(ticket<=0) return;
+   string f=RG_JournalDescriptionFile(ticket);
+   int h=FileOpen(f,FILE_TXT|FILE_WRITE|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(h==INVALID_HANDLE) return;
+   FileWriteString(h,description);
+   FileClose(h);
+}
+
+void RG_JournalDeleteDescription(int ticket)
+{
+   string f=RG_JournalDescriptionFile(ticket);
+   if(FileIsExist(f)) FileDelete(f);
+}
+
 void RG_JournalWriteHeader()
 {
    int h=FileOpen(RG_JOURNAL_FILE,FILE_CSV|FILE_READ|FILE_WRITE|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
@@ -353,8 +445,295 @@ void RG_JournalScan()
 
 void RG_JournalInit()
 {
-   FolderCreate("RiskGuard"); FolderCreate(RG_JOURNAL_FOLDER); RG_JournalLoadSettings(); RG_JournalWriteHeader(); g_RG_JournalReady=true; RG_JournalScan();
+   FolderCreate("RiskGuard");
+   FolderCreate(RG_JOURNAL_FOLDER);
+   g_RG_JournalSettingsVersionKey=RG_JournalGV("SETTINGS_VERSION");
+   RG_JournalLoadSettings();
+   RG_JournalWriteHeader();
+   g_RG_JournalReady=true;
+   RG_JournalScan();
 }
-void RG_JournalUpdate(){ if(!g_RG_JournalReady)return; if(g_RG_JournalEnabled)RG_JournalScan(); }
+
+bool RG_JournalHasPendingSync(){ return(g_RG_JournalPendingSync); }
+void RG_JournalClearPendingSync(){ g_RG_JournalPendingSync=false; }
+
+void RG_JournalUpdate()
+{
+   if(!g_RG_JournalReady) return;
+   if(g_RG_JournalEnabled) RG_JournalScan();
+}
+
+
+
+//====================================================
+// JOURNAL REPORTING
+// Closed trades only are used for analytical P/A calculations.
+// P = 100 * winning closed trades / total closed trades.
+// A = gross profit / absolute gross loss.
+//====================================================
+string RG_JournalReportDate(datetime t){ return(TimeToString(t,TIME_DATE)); }
+
+struct RG_JournalReportMeta
+{
+   int ticket;
+   string symbol;
+   string type;
+   string pattern;
+   string trigger;
+   string tf;
+   string conditions;
+   string session;
+   string date;
+   string time;
+   double lots;
+   double entry;
+   double sl;
+   double tp;
+};
+
+int RG_JournalReadOpenMeta(RG_JournalReportMeta &a[])
+{
+   ArrayResize(a,0);
+   int h=FileOpen(RG_JOURNAL_FILE,FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_ANSI,';');
+   if(h==INVALID_HANDLE) return(0);
+   while(!FileIsEnding(h))
+   {
+      string ev=FileReadString(h); if(StringLen(ev)==0 && FileIsEnding(h)) break;
+      string ticketS=FileReadString(h); string symbol=FileReadString(h); string type=FileReadString(h);
+      string sd=FileReadString(h); string st=FileReadString(h);
+      string bo=FileReadString(h); string bc=FileReadString(h);
+      string entry=FileReadString(h); string exitp=FileReadString(h);
+      string sl=FileReadString(h); string tp=FileReadString(h);
+      string lots=FileReadString(h); string risk=FileReadString(h); string rr=FileReadString(h);
+      string session=FileReadString(h); string news=FileReadString(h);
+      string profit=FileReadString(h); string swap=FileReadString(h); string comm=FileReadString(h);
+      string dur=FileReadString(h); string magic=FileReadString(h); string comment=FileReadString(h);
+      string day=FileReadString(h); string pattern=FileReadString(h); string trigger=FileReadString(h);
+      string reasonTF=FileReadString(h); string conditions=FileReadString(h); string status=FileReadString(h);
+      string checklistRR=FileReadString(h); string checklistVol=FileReadString(h); string flags=FileReadString(h);
+      if(ev!="OPEN") continue;
+      int n=ArraySize(a); ArrayResize(a,n+1);
+      a[n].ticket=(int)StrToInteger(ticketS); a[n].symbol=symbol; a[n].type=type;
+      a[n].pattern=pattern; a[n].trigger=trigger; a[n].tf=reasonTF; a[n].conditions=conditions;
+      a[n].session=session; a[n].date=sd; a[n].time=st; a[n].lots=StrToDouble(lots);
+      a[n].entry=StrToDouble(entry); a[n].sl=StrToDouble(sl); a[n].tp=StrToDouble(tp);
+   }
+   FileClose(h); return(ArraySize(a));
+}
+
+int RG_JournalFindReportMeta(RG_JournalReportMeta &a[],int ticket)
+{
+   for(int i=0;i<ArraySize(a);i++) if(a[i].ticket==ticket) return(i);
+   return(-1);
+}
+
+bool RG_JournalDateInRange(string dateText,datetime fromDate,datetime toDate)
+{
+   datetime d=StrToTime(dateText);
+   if(d<=0) return(false);
+   return(d>=fromDate && d<toDate+86400);
+}
+
+bool RG_JournalCalculateReport(datetime fromDate,datetime toDate,int &trades,int &wins,int &losses,double &grossProfit,double &grossLoss,double &net,double &p,double &a)
+{
+   trades=0; wins=0; losses=0; grossProfit=0.0; grossLoss=0.0; net=0.0; p=0.0; a=0.0;
+   RG_JournalReportMeta meta[]; RG_JournalReadOpenMeta(meta);
+   int h=FileOpen(RG_JOURNAL_FILE,FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
+   if(h==INVALID_HANDLE) return(false);
+   while(!FileIsEnding(h))
+   {
+      string ev=FileReadString(h); if(StringLen(ev)==0 && FileIsEnding(h)) break;
+      string ticketS=FileReadString(h); string symbol=FileReadString(h); string type=FileReadString(h);
+      string sd=FileReadString(h); string st=FileReadString(h);
+      string bo=FileReadString(h); string bc=FileReadString(h);
+      string entry=FileReadString(h); string exitp=FileReadString(h);
+      string sl=FileReadString(h); string tp=FileReadString(h);
+      string lots=FileReadString(h); string risk=FileReadString(h); string rr=FileReadString(h);
+      string session=FileReadString(h); string news=FileReadString(h);
+      string profit=FileReadString(h); string swap=FileReadString(h); string comm=FileReadString(h);
+      string dur=FileReadString(h); string magic=FileReadString(h); string comment=FileReadString(h);
+      string day=FileReadString(h); string pattern=FileReadString(h); string trigger=FileReadString(h);
+      string reasonTF=FileReadString(h); string conditions=FileReadString(h); string status=FileReadString(h);
+      string checklistRR=FileReadString(h); string checklistVol=FileReadString(h); string flags=FileReadString(h);
+      if(ev!="CLOSE") continue;
+      if(!RG_JournalDateInRange(sd,fromDate,toDate)) continue;
+      double pl=StrToDouble(profit); trades++; net+=pl;
+      if(pl>0.0){wins++;grossProfit+=pl;} else if(pl<0.0){losses++;grossLoss+=MathAbs(pl);}
+   }
+   FileClose(h);
+   if(trades>0) p=100.0*(double)wins/(double)trades;
+   if(grossLoss>0.0) a=grossProfit/grossLoss;
+   return(true);
+}
+
+string RG_JournalReportStamp(datetime fromDate,datetime toDate)
+{
+   return(TimeToString(fromDate,TIME_DATE)+" -> "+TimeToString(toDate,TIME_DATE));
+}
+
+bool RG_JournalExportRaw(datetime fromDate,datetime toDate,string &outFile)
+{
+   g_RG_JournalLastExportError=0;
+   outFile="";
+
+   // MT4 file sandbox: this is MQL4\\Files\\DOCS.
+   string folder="DOCS";
+   ResetLastError();
+   FolderCreate(folder);
+
+   // Use a fixed, simple filename for the first stable export implementation.
+   // Excel opens this CSV directly. A later export intentionally overwrites it.
+   string target=folder+"\\RiskGuard_Journal.csv";
+
+   ResetLastError();
+   int out=FileOpen(
+      target,
+      FILE_CSV|FILE_WRITE|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE,
+      ';'
+   );
+   int openErr=GetLastError();
+
+   // If DOCS cannot be opened, try the root MQL4\\Files folder so that the
+   // actual MT4 file-system error is distinguishable from an Excel problem.
+   if(out==INVALID_HANDLE)
+   {
+      g_RG_JournalLastExportError=openErr;
+      ResetLastError();
+      string fallback="RiskGuard_Journal.csv";
+      out=FileOpen(
+         fallback,
+         FILE_CSV|FILE_WRITE|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE,
+         ';'
+      );
+      int fallbackErr=GetLastError();
+      if(out==INVALID_HANDLE)
+      {
+         g_RG_JournalLastExportError=fallbackErr;
+         return(false);
+      }
+      target=fallback;
+   }
+
+   outFile=target;
+
+   // Header is always written, even when there are no Journal trades yet.
+   FileWrite(
+      out,
+      "Ticket","Date","Symbol","Time","Type","Timeframe",
+      "Pattern","Trigger","Conditions","R/R","Volume",
+      "TP","SL","Result","Description"
+   );
+
+   RG_JournalReportMeta meta[];
+   RG_JournalReadOpenMeta(meta);
+
+   ResetLastError();
+   int h=FileOpen(
+      RG_JOURNAL_FILE,
+      FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,
+      ';'
+   );
+
+   if(h!=INVALID_HANDLE)
+   {
+      while(!FileIsEnding(h))
+      {
+         string ev=FileReadString(h);
+         if(StringLen(ev)==0 && FileIsEnding(h)) break;
+
+         string ticketS=FileReadString(h);
+         string symbol=FileReadString(h);
+         string type=FileReadString(h);
+         string sd=FileReadString(h);
+         string st=FileReadString(h);
+         string bo=FileReadString(h);
+         string bc=FileReadString(h);
+         string entry=FileReadString(h);
+         string exitp=FileReadString(h);
+         string sl=FileReadString(h);
+         string tp=FileReadString(h);
+         string lots=FileReadString(h);
+         string risk=FileReadString(h);
+         string rr=FileReadString(h);
+         string session=FileReadString(h);
+         string news=FileReadString(h);
+         string profit=FileReadString(h);
+         string swap=FileReadString(h);
+         string comm=FileReadString(h);
+         string dur=FileReadString(h);
+         string magic=FileReadString(h);
+         string comment=FileReadString(h);
+         string day=FileReadString(h);
+         string pattern=FileReadString(h);
+         string trigger=FileReadString(h);
+         string reasonTF=FileReadString(h);
+         string conditions=FileReadString(h);
+         string status=FileReadString(h);
+         string checklistRR=FileReadString(h);
+         string checklistVol=FileReadString(h);
+         string flags=FileReadString(h);
+
+         if(ev!="CLOSE") continue;
+         if(!RG_JournalDateInRange(sd,fromDate,toDate)) continue;
+
+         int ticket=(int)StrToInteger(ticketS);
+         int mi=RG_JournalFindReportMeta(meta,ticket);
+
+         string pat=(mi>=0 ? meta[mi].pattern : pattern);
+         string tr =(mi>=0 ? meta[mi].trigger  : trigger);
+         string tf =(mi>=0 ? meta[mi].tf       : reasonTF);
+         string cond=(mi>=0 ? meta[mi].conditions : conditions);
+         string vol=(mi>=0 ? DoubleToString(meta[mi].lots,2) : lots);
+         string description=RG_JournalGetDescription(ticket);
+
+         FileWrite(
+            out,
+            ticketS,sd,symbol,st,type,tf,pat,tr,cond,
+            (checklistRR!="" ? checklistRR : rr),
+            vol,tp,sl,profit,description
+         );
+      }
+      FileClose(h);
+   }
+
+   ResetLastError();
+   FileFlush(out);
+   FileClose(out);
+
+   if(!FileIsExist(outFile))
+   {
+      g_RG_JournalLastExportError=GetLastError();
+      return(false);
+   }
+
+   return(true);
+}
+
+bool RG_JournalExportAnalysis(datetime fromDate,datetime toDate,string &outFile)
+{
+   string stamp=TimeToString(TimeLocal(),TIME_DATE|TIME_MINUTES|TIME_SECONDS); StringReplace(stamp,".",""); StringReplace(stamp,":",""); StringReplace(stamp," ","_");
+   outFile=RG_JOURNAL_FOLDER+"\\Journal_Analysis_"+stamp+".csv";
+   int out=FileOpen(outFile,FILE_CSV|FILE_WRITE|FILE_SHARE_READ|FILE_SHARE_WRITE,';'); if(out==INVALID_HANDLE)return(false);
+   int trades,wins,losses; double gp,gl,net,p,a; RG_JournalCalculateReport(fromDate,toDate,trades,wins,losses,gp,gl,net,p,a);
+   FileWrite(out,"RISKGUARD JOURNAL ANALYTICAL REPORT"); FileWrite(out,"PERIOD",RG_JournalReportStamp(fromDate,toDate));
+   FileWrite(out,"TOTAL TRADES",trades); FileWrite(out,"WINNING",wins); FileWrite(out,"LOSING",losses); FileWrite(out,"P (%)",DoubleToString(p,2)); FileWrite(out,"A",DoubleToString(a,2)); FileWrite(out,"GROSS PROFIT",DoubleToString(gp,2)); FileWrite(out,"GROSS LOSS",DoubleToString(gl,2)); FileWrite(out,"NET",DoubleToString(net,2));
+   FileWrite(out,""); FileWrite(out,"TICKET","SYMBOL","TYPE","CLOSE DATE","P/L","PATTERN","TRIGGER","TIMEFRAME","CONDITIONS","SESSION","VOLUME","R/R");
+   RG_JournalReportMeta meta[]; RG_JournalReadOpenMeta(meta);
+   int h=FileOpen(RG_JOURNAL_FILE,FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
+   if(h!=INVALID_HANDLE)
+   {
+      while(!FileIsEnding(h))
+      {
+         string ev=FileReadString(h); if(StringLen(ev)==0 && FileIsEnding(h)) break;
+         string ticketS=FileReadString(h); string symbol=FileReadString(h); string type=FileReadString(h); string sd=FileReadString(h); string st=FileReadString(h);
+         string bo=FileReadString(h); string bc=FileReadString(h); string entry=FileReadString(h); string exitp=FileReadString(h); string sl=FileReadString(h); string tp=FileReadString(h); string lots=FileReadString(h); string risk=FileReadString(h); string rr=FileReadString(h); string session=FileReadString(h); string news=FileReadString(h); string profit=FileReadString(h); string swap=FileReadString(h); string comm=FileReadString(h); string dur=FileReadString(h); string magic=FileReadString(h); string comment=FileReadString(h); string day=FileReadString(h); string pattern=FileReadString(h); string trigger=FileReadString(h); string reasonTF=FileReadString(h); string conditions=FileReadString(h); string status=FileReadString(h); string checklistRR=FileReadString(h); string checklistVol=FileReadString(h); string flags=FileReadString(h);
+         if(ev!="CLOSE" || !RG_JournalDateInRange(sd,fromDate,toDate)) continue;
+         int ticket=(int)StrToInteger(ticketS), mi=RG_JournalFindReportMeta(meta,ticket); string pat=(mi>=0?meta[mi].pattern:""); string tr=(mi>=0?meta[mi].trigger:""); string tf=(mi>=0?meta[mi].tf:""); string cond=(mi>=0?meta[mi].conditions:""); string vol=(mi>=0?DoubleToString(meta[mi].lots,2):lots);
+         FileWrite(out,ticket,symbol,type,sd,profit,pat,tr,tf,cond,session,vol,checklistRR);
+      }
+      FileClose(h);
+   }
+   FileClose(out); return(true);
+}
 
 #endif
