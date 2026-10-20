@@ -66,7 +66,16 @@
 #define RG_GUI_JV_REPORT_TO         RG_GUI_JV_PREFIX+"REPORT_TO"
 #define RG_GUI_JV_REPORT_TODAY      RG_GUI_JV_PREFIX+"REPORT_TODAY"
 #define RG_GUI_JV_REPORT_WEEK       RG_GUI_JV_PREFIX+"REPORT_WEEK"
+#define RG_GUI_JV_REPORT_ALL        RG_GUI_JV_PREFIX+"REPORT_ALL"
+#define RG_GUI_JV_REPORT_MONTH      RG_GUI_JV_PREFIX+"REPORT_MONTH"
 #define RG_GUI_JV_REPORT_SUM        RG_GUI_JV_PREFIX+"REPORT_SUM"
+#define RG_GUI_JV_RANGE_SUM         RG_GUI_JV_PREFIX+"RANGE_SUM"
+#define RG_GUI_JV_FILTER_FROM_LABEL RG_GUI_JV_PREFIX+"FILTER_FROM_LABEL"
+#define RG_GUI_JV_FILTER_TO_LABEL   RG_GUI_JV_PREFIX+"FILTER_TO_LABEL"
+#define RG_GUI_JV_REPORT_PREV       RG_GUI_JV_PREFIX+"REPORT_PREV"
+#define RG_GUI_JV_REPORT_NEXT       RG_GUI_JV_PREFIX+"REPORT_NEXT"
+#define RG_GUI_JV_REPORT_ROW(i)     (RG_GUI_JV_PREFIX+"RROW_"+IntegerToString(i))
+#define RG_GUI_JV_REPORT_CELL(i,c)  (RG_GUI_JV_PREFIX+"RC_"+IntegerToString(i)+"_"+IntegerToString(c))
 #define RG_GUI_JV_DESC              RG_GUI_JV_PREFIX+"DESCRIPTION"
 #define RG_GUI_JV_DESC_T            RG_GUI_JV_PREFIX+"DESCRIPTION_T"
 #define RG_GUI_JV_DESC_EDIT         RG_GUI_JV_PREFIX+"DESCRIPTION_EDIT"
@@ -118,6 +127,8 @@ int g_RG_NewsLastDayKey=-1;
 
 bool g_RG_GUI_SessionsEnabled=true;
 bool g_RG_GUI_SessionsCurrent=true;
+bool g_RG_GUI_SessionsPast=true;
+bool g_RG_GUI_SessionsFutureEnabled=true;
 int  g_RG_GUI_SessionsFuture=3;
 bool g_RG_GUI_SessionsLabels=true;
 bool g_RG_GUI_SessionsOpen=true;
@@ -149,6 +160,8 @@ void RG_GUI_SaveToolsPreferences()
 
    GlobalVariableSet(RG_GUI_PrefKey("SESS_ENABLED"),g_RG_GUI_SessionsEnabled?1.0:0.0);
    GlobalVariableSet(RG_GUI_PrefKey("SESS_CURRENT"),g_RG_GUI_SessionsCurrent?1.0:0.0);
+   GlobalVariableSet(RG_GUI_PrefKey("SESS_PAST"),g_RG_GUI_SessionsPast?1.0:0.0);
+   GlobalVariableSet(RG_GUI_PrefKey("SESS_FUTURE_ENABLED"),g_RG_GUI_SessionsFutureEnabled?1.0:0.0);
    GlobalVariableSet(RG_GUI_PrefKey("SESS_FUTURE"),(double)g_RG_GUI_SessionsFuture);
    GlobalVariableSet(RG_GUI_PrefKey("SESS_LABELS"),g_RG_GUI_SessionsLabels?1.0:0.0);
    GlobalVariableSet(RG_GUI_PrefKey("SESS_OPEN"),g_RG_GUI_SessionsOpen?1.0:0.0);
@@ -175,6 +188,10 @@ void RG_GUI_LoadToolsPreferences()
    if(GlobalVariableCheck(k)) g_RG_GUI_SessionsEnabled=(GlobalVariableGet(k)>0.5);
    k=RG_GUI_PrefKey("SESS_CURRENT");
    if(GlobalVariableCheck(k)) g_RG_GUI_SessionsCurrent=(GlobalVariableGet(k)>0.5);
+   k=RG_GUI_PrefKey("SESS_PAST");
+   if(GlobalVariableCheck(k)) g_RG_GUI_SessionsPast=(GlobalVariableGet(k)>0.5);
+   k=RG_GUI_PrefKey("SESS_FUTURE_ENABLED");
+   if(GlobalVariableCheck(k)) g_RG_GUI_SessionsFutureEnabled=(GlobalVariableGet(k)>0.5);
    k=RG_GUI_PrefKey("SESS_FUTURE");
    if(GlobalVariableCheck(k)) g_RG_GUI_SessionsFuture=(int)MathRound(GlobalVariableGet(k));
    if(g_RG_GUI_SessionsFuture<0) g_RG_GUI_SessionsFuture=0;
@@ -353,6 +370,11 @@ datetime RG_GUI_SessionStartForDate(datetime serverMidnight,int sessionIndex,int
    int brokerOffset=RG_GUI_GetSessionBrokerOffset();
    datetime wantedServerMidnight=serverMidnight+dayShift*86400;
 
+   // Sydney is anchored to 00:00 broker/server time in RiskGuard. This keeps
+   // the NY -> next Sydney boundary continuous across the Sydney DST change.
+   if(sessionIndex==0)
+      return(wantedServerMidnight);
+
    // Calendar date used to evaluate DST. Offset conversion is only used to
    // select the correct UTC date; no UTC-midnight reconstruction is required.
    datetime utcProbe=wantedServerMidnight-brokerOffset*3600;
@@ -379,7 +401,7 @@ int RG_GUI_SessionDurationHours(int index) { return(9); }
 
 void RG_GUI_AddSessionOccurrence(RGSessionOccurrence &items[],int &count,string name,datetime startTime,datetime endTime,color lineColor,bool current)
 {
-   if(count>=32) return;
+   if(count>=64) return;
    items[count].name=name; items[count].startTime=startTime; items[count].endTime=endTime;
    items[count].lineColor=lineColor; items[count].current=current; count++;
 }
@@ -551,8 +573,10 @@ void RG_GUI_DrawMarketSessions()
    if(!g_RG_GUI_SessionsEnabled) return;
 
    int tf=Period();
-   if(tf!=PERIOD_M1 && tf!=PERIOD_M5 && tf!=PERIOD_M15 && tf!=PERIOD_M30 &&
-      tf!=PERIOD_H1 && tf!=PERIOD_H4) return;
+   // Project rule: market-session frames are visible only on M1 and M5.
+   // DeleteSessionObjects() runs before this check, so stale frames are removed
+   // immediately when the chart timeframe changes to M15 or higher.
+   if(tf!=PERIOD_M1 && tf!=PERIOD_M5) return;
 
    datetime now=RG_GUI_GetSessionReferenceNow();
    int nowDow=TimeDayOfWeek(now);
@@ -564,12 +588,12 @@ void RG_GUI_DrawMarketSessions()
    if(nowDow==0 || nowDow==6) return;
 
    datetime midnight=RG_GUI_ServerMidnight(now);
-   RGSessionOccurrence all[32]; int allCount=0;
+   RGSessionOccurrence all[64]; int allCount=0;
 
    // Build occurrences around the current BROKER date, then sort by their
    // actual server time.  This guarantees Sydney -> Tokyo -> London -> New York
    // order instead of allowing a cross-midnight session to jump to the front.
-   for(int day=-2;day<=3;day++)
+   for(int day=-7;day<=3;day++)
       for(int si=0;si<4;si++)
       {
          datetime st=RG_GUI_SessionStartForDate(midnight,si,day);
@@ -585,19 +609,30 @@ void RG_GUI_DrawMarketSessions()
          datetime en=st+RG_GUI_SessionDurationHours(si)*3600;
          bool current=(st<=now && now<en);
          bool future=(st>now);
-         if(!current && !future) continue;
+         bool history=(st<now && st>=now-5*86400);
+         if(!history && !current && !future) continue;
          RG_GUI_AddSessionOccurrence(all,allCount,RG_GUI_SessionName(si),st,en,RG_GUI_SessionColor(si),current);
       }
    RG_GUI_SortSessionOccurrences(all,allCount);
 
-   RGSessionOccurrence selected[16]; int selectedCount=0, futureCount=0;
+   RGSessionOccurrence selected[32]; int selectedCount=0, futureCount=0;
 
-   // CURRENT is independent for every session.  Do not stop after finding
-   // one active session: London and New York can legitimately overlap.
-   // Build the current set first, then add the requested future sessions.
+   // Historical sessions have their own independent ON/OFF control.
+   if(g_RG_GUI_SessionsPast)
+   {
+      for(int i=0;i<allCount && selectedCount<32;i++)
+      {
+         if(all[i].current) continue;
+         if(all[i].startTime>=now) continue;
+         if(all[i].startTime<now-5*86400) continue;
+         selected[selectedCount++]=all[i];
+      }
+   }
+
+   // CURRENT is independent for every session. London and New York can overlap.
    if(g_RG_GUI_SessionsCurrent)
    {
-      for(int i=0;i<allCount && selectedCount<16;i++)
+      for(int i=0;i<allCount && selectedCount<32;i++)
       {
          if(!all[i].current) continue;
 
@@ -616,8 +651,9 @@ void RG_GUI_DrawMarketSessions()
       }
    }
 
-   for(int i=0;i<allCount && selectedCount<16;i++)
+   for(int i=0;i<allCount && selectedCount<32;i++)
    {
+      if(!g_RG_GUI_SessionsFutureEnabled) break;
       if(all[i].startTime<=now) continue;
       if(futureCount>=g_RG_GUI_SessionsFuture) continue;
 
@@ -687,7 +723,8 @@ void RG_GUI_DrawMarketSessions()
       {
          string cap=q.name;
          if(q.current) cap+="  NOW";
-         else cap+="  NEXT";
+         else if(q.startTime>now) cap+="  NEXT";
+         else cap+="  HISTORY";
          RG_GUI_CreateSessionLabel(base+"LABEL",cap,q.startTime,top-(chartRange*0.006),q.lineColor);
       }
    }
@@ -4449,15 +4486,19 @@ void RG_GUI_CreateToolsSessionsPanel(int x,int y,int w)
    int colW=(cw-colGap)/2;
    int rowH=RG_GUI_S(28);
 
-   string names[4]={"Sessions","Current","Next Sessions","Labels"};
-   string keys[4]={"ON_VALUE","CURRENT_VALUE","FUTURE_VALUE","LABELS_VALUE"};
-   string vals[4];
+   // Six separate controls: master, current, past, future ON/OFF,
+   // future-session count, and labels. Keep the two-column Tools layout.
+   string names[6]={"Sessions","Current","Past Sessions","Next Sessions","Next Count","Labels"};
+   string keys[6]={"ON_VALUE","CURRENT_VALUE","PAST_VALUE","FUTURE_ON_VALUE","FUTURE_VALUE","LABELS_VALUE"};
+   string vals[6];
    vals[0]=g_RG_GUI_SessionsEnabled ? "ON" : "OFF";
    vals[1]=g_RG_GUI_SessionsCurrent ? "ON" : "OFF";
-   vals[2]=IntegerToString(g_RG_GUI_SessionsFuture);
-   vals[3]=g_RG_GUI_SessionsLabels ? "ON" : "OFF";
+   vals[2]=g_RG_GUI_SessionsPast ? "ON" : "OFF";
+   vals[3]=g_RG_GUI_SessionsFutureEnabled ? "ON" : "OFF";
+   vals[4]=IntegerToString(g_RG_GUI_SessionsFuture);
+   vals[5]=g_RG_GUI_SessionsLabels ? "ON" : "OFF";
 
-   for(int i=0;i<4;i++)
+   for(int i=0;i<6;i++)
    {
       int col=i%2;
       int row=i/2;
@@ -4467,20 +4508,17 @@ void RG_GUI_CreateToolsSessionsPanel(int x,int y,int w)
       RG_GUI_CreateText(
          RG_GUI_SessionControlName(keys[i])+"_LABEL",
          names[i],
-         cx2,ry+RG_GUI_S(18),
+         cx2,ry+RG_GUI_S(8),
          RG_GUI_MUTED,RG_GUI_FS(8),RG_GUI_Z_TEXT
       );
 
-      color bg=RG_GUI_HEADER_BG;
-      color fg=RG_GUI_TEXT;
-      if((i==0 && g_RG_GUI_SessionsEnabled) ||
-         (i==1 && g_RG_GUI_SessionsCurrent) ||
-         (i==3 && g_RG_GUI_SessionsLabels))
-      {
-         bg=RG_GUI_GREEN;
-         fg=clrBlack;
-      }
-
+      bool active=(i==0 && g_RG_GUI_SessionsEnabled) ||
+                  (i==1 && g_RG_GUI_SessionsCurrent) ||
+                  (i==2 && g_RG_GUI_SessionsPast) ||
+                  (i==3 && g_RG_GUI_SessionsFutureEnabled) ||
+                  (i==5 && g_RG_GUI_SessionsLabels);
+      color bg=active ? RG_GUI_GREEN : RG_GUI_HEADER_BG;
+      color fg=active ? clrBlack : RG_GUI_TEXT;
       RG_GUI_CreateButton(
          RG_GUI_SessionControlName(keys[i]),vals[i],
          cx2+colW-RG_GUI_S(60),ry,
@@ -4493,7 +4531,7 @@ void RG_GUI_CreateToolsSessionsPanel(int x,int y,int w)
    RG_GUI_CreateText(
       RG_GUI_SessionControlName("INFO"),
       "Sydney | Tokyo | London | New York  |  Broker Server Time",
-      cx,yy+2*(rowH+gap)+RG_GUI_S(2),
+      cx,yy+3*(rowH+gap)+RG_GUI_S(2),
       RG_GUI_MUTED,RG_GUI_FS(6),RG_GUI_Z_TEXT
    );
 }
@@ -4520,6 +4558,24 @@ void RG_GUI_ToggleSessionsEnabled()
 void RG_GUI_ToggleSessionsCurrent()
 {
    g_RG_GUI_SessionsCurrent=!g_RG_GUI_SessionsCurrent;
+   RG_GUI_SaveToolsPreferences();
+   RG_GUI_DrawMarketSessions();
+   RG_GUI_UpdateToolsPanel();
+   ChartRedraw();
+}
+
+void RG_GUI_ToggleSessionsPast()
+{
+   g_RG_GUI_SessionsPast=!g_RG_GUI_SessionsPast;
+   RG_GUI_SaveToolsPreferences();
+   RG_GUI_DrawMarketSessions();
+   RG_GUI_UpdateToolsPanel();
+   ChartRedraw();
+}
+
+void RG_GUI_ToggleSessionsFutureEnabled()
+{
+   g_RG_GUI_SessionsFutureEnabled=!g_RG_GUI_SessionsFutureEnabled;
    RG_GUI_SaveToolsPreferences();
    RG_GUI_DrawMarketSessions();
    RG_GUI_UpdateToolsPanel();
@@ -4698,7 +4754,7 @@ void RG_GUI_RefreshNewsPanel()
    int y=RG_GUI_GetPanelY();
    int pw=w;
    int sessionH=(g_RG_GUI_SessionsOpen ? RG_GUI_S(138) : RG_GUI_S(44));
-   int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(360) : RG_GUI_S(48));
+   int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(396) : RG_GUI_S(48));
    int newsH=RG_GUI_S(176);
    if(!g_RG_GUI_NewsOpen)
       newsH=RG_GUI_S(42);
@@ -4840,36 +4896,15 @@ string RG_GUI_JournalRowName(int row)
 int RG_GUI_JournalHeight()
 {
    if(!g_RG_GUI_JournalOpen) return(RG_GUI_S(42));
-   return(RG_GUI_S(206));
+   return(RG_GUI_S(335));
 }
 
 void RG_GUI_JournalStats(int &trades,int &wins,int &losses,double &net)
 {
-   trades=0; wins=0; losses=0; net=0.0;
-   int h=FileOpen(RG_GUI_JOURNAL_FILE,FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
-   if(h==INVALID_HANDLE) return;
-   while(!FileIsEnding(h))
-   {
-      string ev=FileReadString(h);
-      if(FileIsEnding(h) && StringLen(ev)==0) break;
-      string ticket=FileReadString(h);
-      string symbol=FileReadString(h);
-      string type=FileReadString(h);
-      string sd=FileReadString(h); string st=FileReadString(h);
-      string bo=FileReadString(h); string bc=FileReadString(h);
-      string entry=FileReadString(h); string exitp=FileReadString(h);
-      string sl=FileReadString(h); string tp=FileReadString(h);
-      string lots=FileReadString(h); string risk=FileReadString(h); string rr=FileReadString(h);
-      string session=FileReadString(h); string news=FileReadString(h);
-      string profit=FileReadString(h); string swap=FileReadString(h); string comm=FileReadString(h);
-      string dur=FileReadString(h); string magic=FileReadString(h); string comment=FileReadString(h);
-      if(ev!="CLOSE") continue;
-      double pl=StrToDouble(profit);
-      trades++;
-      net+=pl;
-      if(pl>0.0) wins++; else if(pl<0.0) losses++;
-   }
-   FileClose(h);
+   // O(1) UI read. Account History is scanned only by RG_JournalUpdate()
+   // when OrdersHistoryTotal() changes.
+   double P,A,f;
+   RG_JournalGetAccountStats(trades,wins,losses,net,P,A,f);
 }
 
 string RG_GUI_JournalLastRows(int maxRows)
@@ -4912,6 +4947,9 @@ string RG_GUI_JournalLastRows(int maxRows)
 #define RG_GUI_JV_POPUP  RG_GUI_JV_PREFIX+"POPUP"
 #define RG_GUI_JV_CFG    RG_GUI_JV_PREFIX+"CONFIG"
 #define RG_GUI_JV_ON     RG_GUI_JV_PREFIX+"ON"
+#define RG_GUI_JV_ENTRY_MODE RG_GUI_JV_PREFIX+"ENTRY_MODE"
+#define RG_GUI_JV_AFTER_SAVE RG_GUI_JV_PREFIX+"AFTER_SAVE"
+#define RG_GUI_JV_AFTER_SKIP RG_GUI_JV_PREFIX+"AFTER_SKIP"
 #define RG_GUI_JV_CLOSE  RG_GUI_JV_PREFIX+"CLOSE"
 #define RG_GUI_JV_MODE   RG_GUI_JV_PREFIX+"SET_MODE_"
 #define RG_GUI_JV_ADD    RG_GUI_JV_PREFIX+"ADD"
@@ -4952,6 +4990,7 @@ bool g_RG_GUI_JournalReportOpen=false;
 string g_RG_GUI_JournalReportFrom="";
 string g_RG_GUI_JournalReportTo="";
 int g_RG_GUI_JournalReportEditField=0;
+int g_RG_GUI_JournalDataPage=0;
 bool g_RG_GUI_JournalReportEditFocused=false;
 int g_RG_GUI_JournalConfigMode=0;
 int g_RG_GUI_JournalConfigPage=0;
@@ -4964,8 +5003,25 @@ string g_RG_GUI_JournalEditBuffer="";
 bool g_RG_GUI_JournalEditFocused=false;
 bool g_RG_GUI_JournalEditReplaceFirst=false;
 bool g_RG_GUI_JournalDescriptionOpen=false;
+bool g_RG_GUI_JournalDescriptionPrevKeyboardControl=true;
+bool g_RG_GUI_JournalDescriptionEditFocused=false;
 int g_RG_GUI_JournalDescriptionTicket=-1;
 string g_RG_GUI_JournalDescriptionBuffer="";
+
+void RG_GUI_UpdateJournalRangeSummary()
+{
+   datetime fd=StrToTime(g_RG_GUI_JournalReportFrom);
+   datetime td=StrToTime(g_RG_GUI_JournalReportTo);
+   if(fd<=0 || td<=0 || fd>td) return;
+   double P=0.0,A=0.0,f=0.0; int trades=0,wins=0;
+   RG_JournalCalculatePAF(fd,td,P,A,f,trades,wins);
+   string txt="TRADES: "+IntegerToString(trades)+"   P: "+DoubleToString(P*100.0,2)+"%   A: "+DoubleToString(A,3)+"   f: "+DoubleToString(f*100.0,2)+"%";
+   if(ObjectFind(0,RG_GUI_JV_RANGE_SUM)>=0)
+      ObjectSetString(0,RG_GUI_JV_RANGE_SUM,OBJPROP_TEXT,txt);
+   if(ObjectFind(0,RG_GUI_JV_REPORT_SUM)>=0)
+      ObjectSetString(0,RG_GUI_JV_REPORT_SUM,OBJPROP_TEXT,txt);
+}
+
 
 // While the rename dialog is open, MT4 must not have any chart object
 // selected.  Otherwise Backspace is interpreted by the terminal as the
@@ -5018,18 +5074,25 @@ string RG_GUI_JV_Del(int i){return(RG_GUI_JV_DEL+IntegerToString(i));}
 
 void RG_GUI_DeleteJournalReportObjects()
 {
-   // Keep the main JOURNAL-tab REPORT button alive. Only remove the overlay.
-   ObjectDelete(0,RG_GUI_JV_REPORT_PANEL);
-   ObjectDelete(0,RG_GUI_JV_REPORT_PANEL+"_T");
-   ObjectDelete(0,RG_GUI_JV_REPORT_PANEL+"_F");
-   ObjectDelete(0,RG_GUI_JV_REPORT_PANEL+"_TO");
-   ObjectDelete(0,RG_GUI_JV_REPORT_CLOSE);
-   ObjectDelete(0,RG_GUI_JV_REPORT_GEN);
-   ObjectDelete(0,RG_GUI_JV_REPORT_FROM);
-   ObjectDelete(0,RG_GUI_JV_REPORT_TO);
-   ObjectDelete(0,RG_GUI_JV_REPORT_TODAY);
-   ObjectDelete(0,RG_GUI_JV_REPORT_WEEK);
-   ObjectDelete(0,RG_GUI_JV_REPORT_SUM);
+   // Delete every object owned by the Journal Data overlay, including stale
+   // cells/text left by previous redraws. Preserve the main-tab JOURNAL DATA button.
+   string overlayPrefix=RG_GUI_JV_PREFIX+"REPORT";
+   string rowPrefix=RG_GUI_JV_PREFIX+"RROW_";
+   string cellPrefix=RG_GUI_JV_PREFIX+"RC_";
+   for(int i=ObjectsTotal(0,0,-1)-1;i>=0;i--)
+   {
+      string name=ObjectName(0,i,0,-1);
+      // The date controls live on the main JOURNAL tab, not in the overlay.
+      if(name==RG_GUI_JV_REPORT || name==RG_GUI_JV_REPORT_FROM ||
+         name==RG_GUI_JV_REPORT_TO || name==RG_GUI_JV_REPORT_TODAY ||
+         name==RG_GUI_JV_REPORT_WEEK || name==RG_GUI_JV_REPORT_ALL ||
+         name==RG_GUI_JV_REPORT_MONTH) continue;
+      if(StringFind(name,overlayPrefix,0)==0 ||
+         StringFind(name,rowPrefix,0)==0 ||
+         StringFind(name,cellPrefix,0)==0)
+         ObjectDelete(0,name);
+   }
+   ChartRedraw();
 }
 
 void RG_GUI_DeleteJournalRev2Objects()
@@ -5056,7 +5119,8 @@ void RG_GUI_DeleteJournalRev2Objects()
    ObjectDelete(0,RG_GUI_JV_PREFIX+"FH"); ObjectDelete(0,RG_GUI_JV_PREFIX+"CH");
    ObjectDelete(0,RG_GUI_JV_PREFIX+"PG");
    ObjectDelete(0,RG_GUI_JV_REPORT_PANEL); ObjectDelete(0,RG_GUI_JV_REPORT_PANEL+"_T");
-   ObjectDelete(0,RG_GUI_JV_REPORT); ObjectDelete(0,RG_GUI_JV_REPORT+"_T"); ObjectDelete(0,RG_GUI_JV_REPORT_CLOSE); ObjectDelete(0,RG_GUI_JV_REPORT_GEN); ObjectDelete(0,RG_GUI_JV_REPORT_FROM); ObjectDelete(0,RG_GUI_JV_REPORT_TO); ObjectDelete(0,RG_GUI_JV_REPORT_TODAY); ObjectDelete(0,RG_GUI_JV_REPORT_WEEK); ObjectDelete(0,RG_GUI_JV_REPORT_SUM);
+   ObjectDelete(0,RG_GUI_JV_FILTER_FROM_LABEL); ObjectDelete(0,RG_GUI_JV_FILTER_TO_LABEL); ObjectDelete(0,RG_GUI_JV_RANGE_SUM);
+   ObjectDelete(0,RG_GUI_JV_REPORT); ObjectDelete(0,RG_GUI_JV_REPORT+"_T"); ObjectDelete(0,RG_GUI_JV_REPORT_CLOSE); ObjectDelete(0,RG_GUI_JV_REPORT_GEN); ObjectDelete(0,RG_GUI_JV_REPORT_FROM); ObjectDelete(0,RG_GUI_JV_REPORT_TO); ObjectDelete(0,RG_GUI_JV_REPORT_TODAY); ObjectDelete(0,RG_GUI_JV_REPORT_WEEK); ObjectDelete(0,RG_GUI_JV_REPORT_ALL); ObjectDelete(0,RG_GUI_JV_REPORT_MONTH); ObjectDelete(0,RG_GUI_JV_REPORT_SUM);
 }
 
 bool RG_GUI_JV_EditField(string name,string text,int x,int y,int w,int h,int fontSize)
@@ -5079,7 +5143,7 @@ bool RG_GUI_JV_EditField(string name,string text,int x,int y,int w,int h,int fon
    ObjectSetInteger(0,name,OBJPROP_BGCOLOR,clrBlack);
    ObjectSetInteger(0,name,OBJPROP_BORDER_COLOR,RG_GUI_BORDER);
    ObjectSetInteger(0,name,OBJPROP_FONTSIZE,fontSize);
-   ObjectSetString(0,name,OBJPROP_FONT,RG_GUI_FONT);
+   ObjectSetString(0,name,OBJPROP_FONT,"Tahoma");
    ObjectSetInteger(0,name,OBJPROP_ALIGN,ALIGN_LEFT);
    ObjectSetInteger(0,name,OBJPROP_READONLY,false);
    ObjectSetInteger(0,name,OBJPROP_BACK,false);
@@ -5124,9 +5188,23 @@ string RG_GUI_JournalKeyChar(int key)
    return("");
 }
 
+string RG_GUI_JournalDescriptionKeyText(int key,string flags)
+{
+   // On CHARTEVENT_KEYDOWN MT4 may provide the actual translated Unicode
+   // character through sparam. Use it first so Persian/Arabic keyboard
+   // layouts are preserved. Modifier/state strings are ignored unless they
+   // are a single printable character.
+   if(StringLen(flags)==1)
+   {
+      int c=StringGetChar(flags,0);
+      if(c>=32) return(flags);
+   }
+   return(RG_GUI_JournalKeyChar(key));
+}
+
 bool RG_GUI_HandleJournalReportKeyDown(long key)
 {
-   if(!g_RG_GUI_JournalReportOpen || !g_RG_GUI_JournalReportEditFocused || g_RG_GUI_JournalReportEditField<=0) return(false);
+   if(!g_RG_GUI_JournalReportEditFocused || g_RG_GUI_JournalReportEditField<=0) return(false);
    int k=(int)key;
    string value=(g_RG_GUI_JournalReportEditField==1 ? g_RG_GUI_JournalReportFrom : g_RG_GUI_JournalReportTo);
    if(k==13 || k==27) { g_RG_GUI_JournalReportEditFocused=false; return(true); }
@@ -5230,11 +5308,14 @@ void RG_GUI_CreateJournalPreviewPopup()
    if(!RG_JournalPreviewIsOpen()) return;
 
    int cw=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0);
-   int ch=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
-   if(cw<=0 || ch<=0) return;
+   // Subwindow 0 is the main price-chart window. Its pixel height ends at
+   // the divider immediately above the indicator subwindows. Using the
+   // whole-chart height would incorrectly place the checklist below them.
+   int mainChartH=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
+   if(cw<=0 || mainChartH<=0) return;
 
-   // Journal checklist is a fixed bottom drawer. It is intentionally NOT
-   // draggable and is not part of the main RiskGuard panel drag group.
+   // Anchor the checklist to the bottom edge of the main chart window.
+   // CHARTEVENT_CHART_CHANGE rebuilds it when indicator subwindows are resized.
    int outerX=RG_GUI_S(4);
    int outerW=cw-RG_GUI_S(8);
    if(outerW<RG_GUI_S(420)) outerW=cw-RG_GUI_S(2);
@@ -5254,17 +5335,19 @@ void RG_GUI_CreateJournalPreviewPopup()
    int headH=RG_GUI_S(17);
    int titleH=RG_GUI_S(20);
    int bottomPad=RG_GUI_S(5);
-   int h=titleH+headH+rows*(btnH+rowGap)+bottomPad;
+   int afterMode=(RG_JournalEntryMode()==1 && g_RG_JournalAfterEntryTicket>0);
+   int footerH=(afterMode?RG_GUI_S(28):0);
+   int h=titleH+headH+rows*(btnH+rowGap)+bottomPad+footerH;
    if(h<RG_GUI_S(100)) h=RG_GUI_S(100);
    int x=outerX;
-   int y=ch-h-RG_GUI_S(4);
+   int y=mainChartH-h;
    if(y<RG_GUI_S(2)) y=RG_GUI_S(2);
 
    RG_GUI_CreateRect(RG_GUI_JV_POPUP,x,y,outerW,h,RG_GUI_BG,RG_GUI_BORDER,RG_GUI_Z_PANEL+500);
    ObjectSetInteger(0,RG_GUI_JV_POPUP,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,RG_GUI_JV_POPUP,OBJPROP_HIDDEN,true);
 
-   RG_GUI_CreateText(RG_GUI_JV_POPUP+"_T","ENTRY JOURNAL CHECKLIST",x+RG_GUI_S(8),y+RG_GUI_S(4),RG_GUI_YELLOW,RG_GUI_FS(9),RG_GUI_Z_TEXT+510);
+   RG_GUI_CreateText(RG_GUI_JV_POPUP+"_T",afterMode?"AFTER-ENTRY JOURNAL  #"+IntegerToString(g_RG_JournalAfterEntryTicket):"ENTRY JOURNAL CHECKLIST",x+RG_GUI_S(8),y+RG_GUI_S(4),RG_GUI_YELLOW,RG_GUI_FS(9),RG_GUI_Z_TEXT+510);
 
    int inner=x+RG_GUI_S(8);
    int avail=outerW-RG_GUI_S(16);
@@ -5344,6 +5427,16 @@ void RG_GUI_CreateJournalPreviewPopup()
       RG_GUI_CreateText(RG_GUI_JV_PREFIX+"LIMIT","+ items beyond visible area are stored and will be included in the Journal snapshot.",colX[0],y+h-RG_GUI_S(13),RG_GUI_MUTED,RG_GUI_FS(6),RG_GUI_Z_TEXT+510);
    }
    else ObjectDelete(0,RG_GUI_JV_PREFIX+"LIMIT");
+   if(afterMode)
+   {
+      int fy=y+h-RG_GUI_S(25);
+      int fw=RG_GUI_S(82);
+      RG_GUI_CreateButton(RG_GUI_JV_AFTER_SKIP,"SKIP",x+outerW-fw*2-RG_GUI_S(18),fy,fw,RG_GUI_S(21),RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+530);
+      RG_GUI_CreateButton(RG_GUI_JV_AFTER_SAVE,"SAVE JOURNAL",x+outerW-fw-RG_GUI_S(10),fy,fw,RG_GUI_S(21),RG_GUI_GREEN,clrBlack,RG_GUI_Z_BUTTON+530);
+      ObjectSetInteger(0,RG_GUI_JV_AFTER_SAVE,OBJPROP_FONTSIZE,RG_GUI_FS(6));
+      ObjectSetInteger(0,RG_GUI_JV_AFTER_SKIP,OBJPROP_FONTSIZE,RG_GUI_FS(6));
+   }
+   else { ObjectDelete(0,RG_GUI_JV_AFTER_SAVE); ObjectDelete(0,RG_GUI_JV_AFTER_SKIP); }
 }
 
 void RG_GUI_RefreshJournalPreviewState()
@@ -5363,12 +5456,16 @@ void RG_GUI_RefreshJournalPreviewState()
 
 void RG_GUI_DeleteJournalDescriptionPanel()
 {
+   // Restore normal chart keyboard handling and chart-object selection state.
+   ChartSetInteger(0,CHART_KEYBOARD_CONTROL,g_RG_GUI_JournalDescriptionPrevKeyboardControl);
+   RG_GUI_JournalRestoreChartObjects();
    ObjectDelete(0,RG_GUI_JV_DESC);
    ObjectDelete(0,RG_GUI_JV_DESC_T);
    ObjectDelete(0,RG_GUI_JV_DESC_EDIT);
    ObjectDelete(0,RG_GUI_JV_DESC_SAVE);
    ObjectDelete(0,RG_GUI_JV_DESC_SKIP);
    g_RG_GUI_JournalDescriptionOpen=false;
+   g_RG_GUI_JournalDescriptionEditFocused=false;
    g_RG_GUI_JournalDescriptionTicket=-1;
    g_RG_GUI_JournalDescriptionBuffer="";
 }
@@ -5379,6 +5476,9 @@ void RG_GUI_OpenJournalDescription(int ticket)
    g_RG_GUI_JournalDescriptionTicket=ticket;
    g_RG_GUI_JournalDescriptionBuffer=RG_JournalGetDescription(ticket);
    g_RG_GUI_JournalDescriptionOpen=true;
+   g_RG_GUI_JournalDescriptionEditFocused=false;
+   g_RG_GUI_JournalDescriptionPrevKeyboardControl=(bool)ChartGetInteger(0,CHART_KEYBOARD_CONTROL);
+   ChartSetInteger(0,CHART_KEYBOARD_CONTROL,false);
    g_RG_GUI_JournalEditType=-1;
    g_RG_GUI_JournalEditFocused=false;
    g_RG_GUI_JournalEditReplaceFirst=false;
@@ -5402,8 +5502,35 @@ void RG_GUI_CreateJournalDescriptionPanel()
       RG_GUI_CreateText(RG_GUI_JV_DESC_T,"TRADE DESCRIPTION",x+RG_GUI_S(12),y+RG_GUI_S(10),RG_GUI_YELLOW,RG_GUI_FS(11),RG_GUI_Z_TEXT+1310);
       RG_GUI_CreateText(RG_GUI_JV_DESC_T+"_I","Ticket #"+IntegerToString(g_RG_GUI_JournalDescriptionTicket)+"  |  Add a note for this trade.",x+RG_GUI_S(12),y+RG_GUI_S(34),RG_GUI_MUTED,RG_GUI_FS(8),RG_GUI_Z_TEXT+1310);
       RG_GUI_JV_EditField(RG_GUI_JV_DESC_EDIT,g_RG_GUI_JournalDescriptionBuffer,x+RG_GUI_S(12),y+RG_GUI_S(58),w-RG_GUI_S(24),RG_GUI_S(42),RG_GUI_FS(9));
+      // FIX12: the Description field is a protected visual editor. Keyboard
+      // input is handled by OnChartEvent so Backspace/Delete are consumed by
+      // the Description editor and never reach the chart-object deletion path.
+      // The text itself is still rendered by OBJ_EDIT for a familiar MT4 UI.
+      if(ObjectFind(0,RG_GUI_JV_DESC_EDIT)>=0)
+      {
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_READONLY,false);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTABLE,true);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTED,true);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_ZORDER,65000);
+         ObjectSetString(0,RG_GUI_JV_DESC_EDIT,OBJPROP_FONT,"Tahoma");
+         RG_GUI_JournalProtectChartObjects();
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTABLE,true);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTED,true);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_READONLY,false);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_ZORDER,65000);
+      }
       RG_GUI_CreateButton(RG_GUI_JV_DESC_SAVE,"SAVE",x+w-RG_GUI_S(142),y+h-RG_GUI_S(32),RG_GUI_S(60),RG_GUI_S(22),RG_GUI_GREEN,clrBlack,RG_GUI_Z_BUTTON+1320);
       RG_GUI_CreateButton(RG_GUI_JV_DESC_SKIP,"SKIP",x+w-RG_GUI_S(74),y+h-RG_GUI_S(32),RG_GUI_S(60),RG_GUI_S(22),RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+1320);
+
+      // Re-apply protection after SAVE/SKIP are created.
+      RG_GUI_JournalProtectChartObjects();
+      if(ObjectFind(0,RG_GUI_JV_DESC_EDIT)>=0)
+      {
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTABLE,true);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTED,true);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_READONLY,false);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_ZORDER,65000);
+      }
    }
    else
    {
@@ -5418,61 +5545,109 @@ void RG_GUI_CreateJournalReportPanel()
 {
    if(!g_RG_GUI_JournalReportOpen) return;
 
+   // J08: default report range matches the currently loaded MT4
+   // Account History instead of silently limiting the report to 30 days.
    if(g_RG_GUI_JournalReportFrom=="")
-      g_RG_GUI_JournalReportFrom=TimeToString(TimeCurrent()-30*86400,TIME_DATE);
+   {
+      datetime firstHistory=RG_JournalGetEarliestHistoryDate();
+      if(firstHistory>0)
+         g_RG_GUI_JournalReportFrom=TimeToString(firstHistory,TIME_DATE);
+      else
+         g_RG_GUI_JournalReportFrom=TimeToString(TimeCurrent(),TIME_DATE);
+   }
+
    if(g_RG_GUI_JournalReportTo=="")
       g_RG_GUI_JournalReportTo=TimeToString(TimeCurrent(),TIME_DATE);
 
    int cw=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0);
    int ch=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
-   int w=RG_GUI_S(560), h=RG_GUI_S(270);
-   if(w>cw-RG_GUI_S(20)) w=cw-RG_GUI_S(20);
-   if(h>ch-RG_GUI_S(20)) h=ch-RG_GUI_S(20);
+   int w=RG_GUI_S(980), h=RG_GUI_S(650);
+   if(w>cw-RG_GUI_S(10)) w=cw-RG_GUI_S(10);
+   if(h>ch-RG_GUI_S(10)) h=ch-RG_GUI_S(10);
    int x=(cw-w)/2, y=(ch-h)/2;
 
-   // Build the report panel only once. Recreating it on every tick causes
-   // visible blinking and destroys native OBJ_EDIT keyboard focus.
    if(ObjectFind(0,RG_GUI_JV_REPORT_PANEL)<0)
    {
       RG_GUI_CreateRect(RG_GUI_JV_REPORT_PANEL,x,y,w,h,RG_GUI_BG,RG_GUI_BORDER,RG_GUI_Z_PANEL+1200);
-      RG_GUI_CreateText(RG_GUI_JV_REPORT_PANEL+"_T","JOURNAL REPORT",x+RG_GUI_S(12),y+RG_GUI_S(10),RG_GUI_YELLOW,RG_GUI_FS(11),RG_GUI_Z_TEXT+1210);
-      RG_GUI_CreateText(RG_GUI_JV_REPORT_PANEL+"_F","FROM (YYYY.MM.DD)",x+RG_GUI_S(12),y+RG_GUI_S(38),RG_GUI_MUTED,RG_GUI_FS(7),RG_GUI_Z_TEXT+1210);
-      RG_GUI_CreateText(RG_GUI_JV_REPORT_PANEL+"_TO","TO (YYYY.MM.DD)",x+RG_GUI_S(250),y+RG_GUI_S(38),RG_GUI_MUTED,RG_GUI_FS(7),RG_GUI_Z_TEXT+1210);
-
-      RG_GUI_JV_EditField(RG_GUI_JV_REPORT_FROM,g_RG_GUI_JournalReportFrom,x+RG_GUI_S(12),y+RG_GUI_S(52),RG_GUI_S(210),RG_GUI_S(24),RG_GUI_FS(8));
-      RG_GUI_JV_EditField(RG_GUI_JV_REPORT_TO,g_RG_GUI_JournalReportTo,x+RG_GUI_S(250),y+RG_GUI_S(52),RG_GUI_S(210),RG_GUI_S(24),RG_GUI_FS(8));
-      ObjectSetInteger(0,RG_GUI_JV_REPORT_FROM,OBJPROP_SELECTABLE,true);
-      ObjectSetInteger(0,RG_GUI_JV_REPORT_FROM,OBJPROP_SELECTED,false);
-      ObjectSetInteger(0,RG_GUI_JV_REPORT_TO,OBJPROP_SELECTABLE,true);
-      ObjectSetInteger(0,RG_GUI_JV_REPORT_TO,OBJPROP_SELECTED,false);
-
-      RG_GUI_CreateButton(RG_GUI_JV_REPORT_TODAY,"TODAY",x+RG_GUI_S(12),y+RG_GUI_S(86),RG_GUI_S(72),RG_GUI_S(24),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+1220);
-      RG_GUI_CreateButton(RG_GUI_JV_REPORT_WEEK,"THIS WEEK",x+RG_GUI_S(90),y+RG_GUI_S(86),RG_GUI_S(90),RG_GUI_S(24),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+1220);
-      RG_GUI_CreateButton(RG_GUI_JV_REPORT_GEN,"EXPORT EXCEL",x+RG_GUI_S(188),y+RG_GUI_S(86),RG_GUI_S(118),RG_GUI_S(24),RG_GUI_GREEN,clrBlack,65000);
-      if(ObjectFind(0,RG_GUI_JV_REPORT_GEN)>=0) ObjectSetInteger(0,RG_GUI_JV_REPORT_GEN,OBJPROP_HIDDEN,false);
-      RG_GUI_CreateButton(RG_GUI_JV_REPORT_CLOSE,"CLOSE",x+w-RG_GUI_S(72),y+h-RG_GUI_S(30),RG_GUI_S(60),RG_GUI_S(22),RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+1220);
-      RG_GUI_CreateText(RG_GUI_JV_REPORT_SUM,"Enter dates and press GENERATE.",x+RG_GUI_S(12),y+RG_GUI_S(122),RG_GUI_TEXT,RG_GUI_FS(8),RG_GUI_Z_TEXT+1210);
+      RG_GUI_CreateText(RG_GUI_JV_REPORT_PANEL+"_T","JOURNAL DATA",x+RG_GUI_S(12),y+RG_GUI_S(10),RG_GUI_YELLOW,RG_GUI_FS(11),RG_GUI_Z_TEXT+1210);
+      RG_GUI_CreateButton(RG_GUI_JV_REPORT_GEN,"EXPORT EXCEL",x+RG_GUI_S(12),y+RG_GUI_S(42),RG_GUI_S(100),RG_GUI_S(24),RG_GUI_GREEN,clrBlack,65000);
+      RG_GUI_CreateButton(RG_GUI_JV_REPORT_CLOSE,"CLOSE",x+w-RG_GUI_S(72),y+RG_GUI_S(10),RG_GUI_S(60),RG_GUI_S(22),RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+1220);
+      RG_GUI_CreateText(RG_GUI_JV_REPORT_SUM,"",x+RG_GUI_S(125),y+RG_GUI_S(48),RG_GUI_TEXT,RG_GUI_FS(8),RG_GUI_Z_TEXT+1210);
    }
-   else
+
+   datetime fd=StrToTime(g_RG_GUI_JournalReportFrom), td=StrToTime(g_RG_GUI_JournalReportTo);
+   if(fd<=0) fd=TimeCurrent()-30*86400;
+   if(td<=0) td=TimeCurrent();
+   double P,A,f; int trades,wins; RG_JournalCalculatePAF(fd,td,P,A,f,trades,wins);
+   ObjectSetString(0,RG_GUI_JV_REPORT_SUM,OBJPROP_TEXT,"TRADES: "+IntegerToString(trades)+"   P: "+DoubleToString(P*100.0,2)+"%   A: "+DoubleToString(A,3)+"   f: "+DoubleToString(f*100.0,2)+"%");
+
+   string heads[13]={"Ticket","Date","Time","Symbol","Type","TF","Pattern","Trigger","Condition","R/R","Volume","MGMT","Result"};
+   int widths[13]={55,70,60,60,45,40,120,85,130,55,50,100,65};
+   int totalW=0; for(int wi=0;wi<13;wi++) totalW+=RG_GUI_S(widths[wi]);
+   int startX=x+w-RG_GUI_S(12)-totalW;
+   if(startX<x+RG_GUI_S(8)) startX=x+RG_GUI_S(8);
+   int headerY=y+RG_GUI_S(88), rowH=RG_GUI_S(23);
+
+   // Remove any stale cells from a previous report instance before drawing
+   // the current page. This prevents ghost columns/rows until timeframe change.
+   for(int ci=0;ci<13;ci++)
    {
-      // Keep native editors alive. Only repair their position if necessary.
-      if(ObjectFind(0,RG_GUI_JV_REPORT_FROM)>=0)
+      ObjectDelete(0,RG_GUI_JV_REPORT_CELL(99,ci));
+      ObjectDelete(0,RG_GUI_JV_REPORT_CELL(98,ci));
+   }
+   for(int ri=0;ri<20;ri++)
+   {
+      for(int ci=0;ci<13;ci++)
       {
-         ObjectSetInteger(0,RG_GUI_JV_REPORT_FROM,OBJPROP_XDISTANCE,x+RG_GUI_S(12));
-         ObjectSetInteger(0,RG_GUI_JV_REPORT_FROM,OBJPROP_YDISTANCE,y+RG_GUI_S(52));
-      }
-      if(ObjectFind(0,RG_GUI_JV_REPORT_TO)>=0)
-      {
-         ObjectSetInteger(0,RG_GUI_JV_REPORT_TO,OBJPROP_XDISTANCE,x+RG_GUI_S(250));
-         ObjectSetInteger(0,RG_GUI_JV_REPORT_TO,OBJPROP_YDISTANCE,y+RG_GUI_S(52));
-      }
-      if(ObjectFind(0,RG_GUI_JV_REPORT_GEN)>=0)
-      {
-         ObjectSetInteger(0,RG_GUI_JV_REPORT_GEN,OBJPROP_ZORDER,65000);
-         ObjectSetInteger(0,RG_GUI_JV_REPORT_GEN,OBJPROP_HIDDEN,false);
+         ObjectDelete(0,RG_GUI_JV_REPORT_ROW(ri)+"_"+IntegerToString(ci));
+         ObjectDelete(0,RG_GUI_JV_REPORT_ROW(ri)+"_"+IntegerToString(ci)+"_T");
       }
    }
+
+   int cursor=startX;
+   for(int ci=0;ci<13;ci++)
+   {
+      int ww=RG_GUI_S(widths[ci]);
+      RG_GUI_CreateRect(RG_GUI_JV_REPORT_CELL(99,ci),cursor,headerY,ww,rowH,RG_GUI_HEADER_BG,RG_GUI_BORDER,RG_GUI_Z_PANEL+1230);
+      RG_GUI_CreateText(RG_GUI_JV_REPORT_CELL(98,ci),heads[ci],cursor+RG_GUI_S(3),headerY+RG_GUI_S(5),RG_GUI_CYAN,RG_GUI_FS(7),RG_GUI_Z_TEXT+1240);
+      cursor+=ww;
+   }
+
+   RG_JournalRecord rows[]; int count=RG_JournalLoadClosedRecords(rows,fd,td);
+   int maxPage=(count<=0?0:(count-1)/20); if(g_RG_GUI_JournalDataPage>maxPage)g_RG_GUI_JournalDataPage=maxPage;
+   int first=g_RG_GUI_JournalDataPage*20;
+   for(int ri=0;ri<20;ri++)
+   {
+      for(int ci=0;ci<13;ci++){ ObjectDelete(0,RG_GUI_JV_REPORT_CELL(ri,ci)); ObjectDelete(0,RG_GUI_JV_REPORT_ROW(ri)+"_"+IntegerToString(ci)); }
+      int idx=first+ri; if(idx>=count) continue;
+      string vals[13];
+      vals[0]=IntegerToString(rows[idx].ticket); vals[1]=rows[idx].date; vals[2]=rows[idx].time; vals[3]=rows[idx].symbol; vals[4]=rows[idx].type; vals[5]=rows[idx].tf;
+      vals[6]=rows[idx].pattern; vals[7]=rows[idx].trigger; vals[8]=rows[idx].conditions; vals[9]=rows[idx].rr; vals[10]=DoubleToString(rows[idx].lots,2);
+      vals[11]="";
+      if(rows[idx].partialExit!="") vals[11]+="PART: ✓";
+      if(rows[idx].slMove!="")
+      {
+         if(vals[11]!="") vals[11]+=" | ";
+         vals[11]+="SL: ✓";
+      }
+      if(vals[11]=="") vals[11]="-";
+      vals[12]=DoubleToString(rows[idx].net,2);
+      cursor=startX; int yy=headerY+rowH*(ri+1);
+      for(int ci=0;ci<13;ci++)
+      {
+         int ww=RG_GUI_S(widths[ci]);
+         string bn=RG_GUI_JV_REPORT_ROW(ri)+"_"+IntegerToString(ci);
+         RG_GUI_CreateRect(bn,cursor,yy,ww,rowH,RG_GUI_BG,RG_GUI_BORDER,RG_GUI_Z_PANEL+1230);
+         RG_GUI_CreateText(bn+"_T",vals[ci],cursor+RG_GUI_S(3),yy+RG_GUI_S(5),ci==12?(rows[idx].net>=0?RG_GUI_GREEN:RG_GUI_RED):RG_GUI_TEXT,RG_GUI_FS(6),RG_GUI_Z_TEXT+1240);
+         cursor+=ww;
+      }
+   }
+   int navY=headerY+rowH*21+RG_GUI_S(5);
+   RG_GUI_CreateButton(RG_GUI_JV_REPORT_PREV,"< PREV",x+RG_GUI_S(12),navY,RG_GUI_S(72),RG_GUI_S(24),RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+1240);
+   RG_GUI_CreateButton(RG_GUI_JV_REPORT_NEXT,"NEXT >",x+RG_GUI_S(90),navY,RG_GUI_S(72),RG_GUI_S(24),RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+1240);
+   RG_GUI_CreateText(RG_GUI_JV_REPORT_PANEL+"_PAGE","PAGE "+IntegerToString(g_RG_GUI_JournalDataPage+1)+" / "+IntegerToString(maxPage+1)+"   (20 RECORDS MAX)",x+RG_GUI_S(175),navY+RG_GUI_S(5),RG_GUI_MUTED,RG_GUI_FS(7),RG_GUI_Z_TEXT+1240);
 }
+
 void RG_GUI_CreateJournalTabPanel(int x,int top,int pw,int panelH)
 {
    int inner=x+RG_GUI_S(10), innerW=pw-RG_GUI_S(20);
@@ -5481,29 +5656,67 @@ void RG_GUI_CreateJournalTabPanel(int x,int top,int pw,int panelH)
    // Keep the title and ON/OFF control on separate, readable positions.
    RG_GUI_CreateText(RG_PREFIX+"JOURNAL_TITLE","TRADE JOURNAL",inner,top+RG_GUI_S(8),RG_GUI_YELLOW,RG_GUI_FS(11),RG_GUI_Z_TEXT+30);
    int onW=RG_GUI_S(108);
+   int modeW=RG_GUI_S(122);
    RG_GUI_CreateButton(RG_GUI_JV_ON,RG_JournalEnabled()?"JOURNAL: ON":"JOURNAL: OFF",x+pw-onW-RG_GUI_S(10),top+RG_GUI_S(5),onW,RG_GUI_S(27),RG_JournalEnabled()?RG_GUI_GREEN:RG_GUI_HEADER_BG,RG_JournalEnabled()?clrBlack:RG_GUI_TEXT,RG_GUI_Z_BUTTON+200);
+   ObjectSetInteger(0,RG_GUI_JV_ON,OBJPROP_FONTSIZE,RG_GUI_FS(7));
+   RG_GUI_CreateButton(RG_GUI_JV_ENTRY_MODE,RG_JournalEntryMode()==0?"ENTRY: BEFORE":"ENTRY: AFTER",x+pw-onW-modeW-RG_GUI_S(16),top+RG_GUI_S(5),modeW,RG_GUI_S(27),RG_JournalEntryMode()==0?RG_GUI_HEADER_BG:RG_GUI_BLUE,RG_GUI_CYAN,RG_GUI_Z_BUTTON+201);
+   ObjectSetInteger(0,RG_GUI_JV_ENTRY_MODE,OBJPROP_FONTSIZE,RG_GUI_FS(7));
 
-   RG_GUI_CreateText(RG_PREFIX+"JOURNAL_SUB","Define your own Conditions, Patterns and Triggers.",inner,top+RG_GUI_S(32),RG_GUI_MUTED,RG_GUI_FS(8),RG_GUI_Z_TEXT+30);
-   int trades=0,wins=0,losses=0; double net=0.0; RG_GUI_JournalStats(trades,wins,losses,net);
-   RG_GUI_CreateText(RG_GUI_JournalSummaryName(),"Trades: "+IntegerToString(trades)+"   W: "+IntegerToString(wins)+"   L: "+IntegerToString(losses)+"   Net: "+DoubleToString(net,2),inner,top+RG_GUI_S(50),net>=0.0?RG_GUI_GREEN:RG_GUI_RED,RG_GUI_FS(8),RG_GUI_Z_TEXT+30);
-   RG_GUI_CreateButton(RG_GUI_JV_REPORT,"REPORT",x+pw-RG_GUI_S(92),top+RG_GUI_S(40),RG_GUI_S(82),RG_GUI_S(25),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+520);
 
-   int tabY=top+RG_GUI_S(76), gap=RG_GUI_S(6), tabW=(innerW-gap*2)/3;
+   // Date range controls are available before opening JOURNAL DATA.
+   if(g_RG_GUI_JournalReportFrom=="")
+   {
+      datetime firstHistory=RG_JournalGetEarliestHistoryDate();
+      g_RG_GUI_JournalReportFrom=(firstHistory>0?TimeToString(firstHistory,TIME_DATE):TimeToString(TimeCurrent(),TIME_DATE));
+   }
+   if(g_RG_GUI_JournalReportTo=="") g_RG_GUI_JournalReportTo=TimeToString(TimeCurrent(),TIME_DATE);
+   // Add breathing room between the date labels and editable date fields.
+   RG_GUI_CreateText(RG_GUI_JV_FILTER_FROM_LABEL,"FROM",inner,top+RG_GUI_S(41),RG_GUI_MUTED,RG_GUI_FS(6),RG_GUI_Z_TEXT+30);
+   RG_GUI_CreateText(RG_GUI_JV_FILTER_TO_LABEL,"TO",inner+RG_GUI_S(112),top+RG_GUI_S(41),RG_GUI_MUTED,RG_GUI_FS(6),RG_GUI_Z_TEXT+30);
+   RG_GUI_JV_EditField(RG_GUI_JV_REPORT_FROM,g_RG_GUI_JournalReportFrom,inner,top+RG_GUI_S(56),RG_GUI_S(100),RG_GUI_S(26),RG_GUI_FS(7));
+   RG_GUI_JV_EditField(RG_GUI_JV_REPORT_TO,g_RG_GUI_JournalReportTo,inner+RG_GUI_S(112),top+RG_GUI_S(56),RG_GUI_S(100),RG_GUI_S(26),RG_GUI_FS(7));
+   // Date filters occupy their own full-width row; JOURNAL DATA is a separate action below.
+   int dateBtnY=top+RG_GUI_S(88), dateBtnH=RG_GUI_S(27), dateGap=RG_GUI_S(4);
+   int usableDateW=innerW-dateGap*3;
+   int wToday=usableDateW*18/100, wWeek=usableDateW*25/100, wMonth=usableDateW*29/100;
+   int wAll=usableDateW-wToday-wWeek-wMonth;
+   int dateBtnX=inner;
+   RG_GUI_CreateButton(RG_GUI_JV_REPORT_TODAY,"TODAY",dateBtnX,dateBtnY,wToday,dateBtnH,RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+520); dateBtnX+=wToday+dateGap;
+   RG_GUI_CreateButton(RG_GUI_JV_REPORT_WEEK,"THIS WEEK",dateBtnX,dateBtnY,wWeek,dateBtnH,RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+520); dateBtnX+=wWeek+dateGap;
+   RG_GUI_CreateButton(RG_GUI_JV_REPORT_MONTH,"THIS MONTH",dateBtnX,dateBtnY,wMonth,dateBtnH,RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+520); dateBtnX+=wMonth+dateGap;
+   RG_GUI_CreateButton(RG_GUI_JV_REPORT_ALL,"ALL",dateBtnX,dateBtnY,wAll,dateBtnH,RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+520);
+   int dataW=RG_GUI_S(150), dataY=dateBtnY+dateBtnH+RG_GUI_S(8);
+   RG_GUI_CreateButton(RG_GUI_JV_REPORT,"JOURNAL DATA",inner,dataY,dataW,RG_GUI_S(27),RG_GUI_HEADER_BG,RG_GUI_CYAN,RG_GUI_Z_BUTTON+520);
+   ObjectSetInteger(0,RG_GUI_JV_REPORT_TODAY,OBJPROP_FONTSIZE,RG_GUI_FS(6));
+   ObjectSetInteger(0,RG_GUI_JV_REPORT_WEEK,OBJPROP_FONTSIZE,RG_GUI_FS(6));
+   ObjectSetInteger(0,RG_GUI_JV_REPORT_MONTH,OBJPROP_FONTSIZE,RG_GUI_FS(6));
+   ObjectSetInteger(0,RG_GUI_JV_REPORT_ALL,OBJPROP_FONTSIZE,RG_GUI_FS(6));
+   ObjectSetInteger(0,RG_GUI_JV_REPORT,OBJPROP_FONTSIZE,RG_GUI_FS(6));
+   // Summary statistics are intentionally shown only inside JOURNAL DATA.
+   ObjectDelete(0,RG_GUI_JV_RANGE_SUM);
+   // The explanatory line belongs ABOVE the Conditions / Patterns / Triggers tabs.
+   RG_GUI_CreateText(RG_PREFIX+"JOURNAL_SUB","Define your own Conditions, Patterns and Triggers.",inner,top+RG_GUI_S(158),RG_GUI_MUTED,RG_GUI_FS(6),RG_GUI_Z_TEXT+30);
+   int tabY=top+RG_GUI_S(181), gap=RG_GUI_S(6), tabW=(innerW-gap*2)/3;
    RG_GUI_CreateButton(RG_GUI_JV_MODE+"0","CONDITIONS",inner,tabY,tabW,RG_GUI_S(25),g_RG_GUI_JournalConfigMode==0?RG_GUI_GREEN:RG_GUI_HEADER_BG,g_RG_GUI_JournalConfigMode==0?clrBlack:RG_GUI_CYAN,RG_GUI_Z_BUTTON+520);
    RG_GUI_CreateButton(RG_GUI_JV_MODE+"1","PATTERNS",inner+tabW+gap,tabY,tabW,RG_GUI_S(25),g_RG_GUI_JournalConfigMode==1?RG_GUI_GREEN:RG_GUI_HEADER_BG,g_RG_GUI_JournalConfigMode==1?clrBlack:RG_GUI_CYAN,RG_GUI_Z_BUTTON+520);
    RG_GUI_CreateButton(RG_GUI_JV_MODE+"2","TRIGGERS",inner+(tabW+gap)*2,tabY,tabW,RG_GUI_S(25),g_RG_GUI_JournalConfigMode==2?RG_GUI_GREEN:RG_GUI_HEADER_BG,g_RG_GUI_JournalConfigMode==2?clrBlack:RG_GUI_CYAN,RG_GUI_Z_BUTTON+520);
+   ObjectSetInteger(0,RG_GUI_JV_MODE+"0",OBJPROP_FONTSIZE,RG_GUI_FS(6));
+   ObjectSetInteger(0,RG_GUI_JV_MODE+"1",OBJPROP_FONTSIZE,RG_GUI_FS(6));
+   ObjectSetInteger(0,RG_GUI_JV_MODE+"2",OBJPROP_FONTSIZE,RG_GUI_FS(6));
 
    int count=(g_RG_GUI_JournalConfigMode==0?g_RG_JournalConditionCount:(g_RG_GUI_JournalConfigMode==1?g_RG_JournalPatternCount:g_RG_JournalTriggerCount));
    int pageSize=6, maxPage=(count<=0?0:(count-1)/pageSize); if(g_RG_GUI_JournalConfigPage>maxPage) g_RG_GUI_JournalConfigPage=maxPage;
-   int listY=tabY+RG_GUI_S(34), chipW=(innerW-gap)/2, chipH=RG_GUI_S(24), rowGap=RG_GUI_S(5), first=g_RG_GUI_JournalConfigPage*pageSize;
+   int listY=tabY+RG_GUI_S(38), chipW=(innerW-gap)/2, chipH=RG_GUI_S(30), rowGap=RG_GUI_S(8), first=g_RG_GUI_JournalConfigPage*pageSize;
    for(int r=0;r<3;r++) for(int c=0;c<2;c++)
    {
       int i=first+r*2+c, yy=listY+r*(chipH+rowGap), xx=inner+c*(chipW+gap);
       string name=""; if(g_RG_GUI_JournalConfigMode==0 && i<g_RG_JournalConditionCount) name=g_RG_JournalConditions[i].name; if(g_RG_GUI_JournalConfigMode==1 && i<g_RG_JournalPatternCount) name=g_RG_JournalPatterns[i].name; if(g_RG_GUI_JournalConfigMode==2 && i<g_RG_JournalTriggerCount) name=g_RG_JournalTriggers[i].name;
       if(i<count)
       {
-         RG_GUI_CreateButton(RG_GUI_JV_Edit(i),"EDIT  "+name,xx,yy,chipW-RG_GUI_S(30),chipH,RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+540);
+         RG_GUI_CreateButton(RG_GUI_JV_Edit(i),name,xx,yy,chipW-RG_GUI_S(30),chipH,RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+540);
+         ObjectSetInteger(0,RG_GUI_JV_Edit(i),OBJPROP_FONTSIZE,RG_GUI_FS(5));
          RG_GUI_CreateButton(RG_GUI_JV_Del(i),"X",xx+chipW-RG_GUI_S(26),yy,RG_GUI_S(22),chipH,RG_GUI_HEADER_BG,RG_GUI_RED,RG_GUI_Z_BUTTON+540);
+         ObjectSetInteger(0,RG_GUI_JV_Del(i),OBJPROP_FONTSIZE,RG_GUI_FS(6));
       }
       else { ObjectDelete(0,RG_GUI_JV_Edit(i)); ObjectDelete(0,RG_GUI_JV_Del(i)); }
    }
@@ -5511,7 +5724,10 @@ void RG_GUI_CreateJournalTabPanel(int x,int top,int pw,int panelH)
    RG_GUI_CreateButton(RG_GUI_JV_ADD,"+ ADD",inner,addY,RG_GUI_S(72),RG_GUI_S(23),RG_GUI_HEADER_BG,RG_GUI_GREEN,RG_GUI_Z_BUTTON+520);
    RG_GUI_CreateButton(RG_GUI_JV_PREV,"<",inner+RG_GUI_S(78),addY,RG_GUI_S(23),RG_GUI_S(23),RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+520);
    RG_GUI_CreateButton(RG_GUI_JV_NEXT,">",inner+RG_GUI_S(105),addY,RG_GUI_S(23),RG_GUI_S(23),RG_GUI_HEADER_BG,RG_GUI_TEXT,RG_GUI_Z_BUTTON+520);
-   RG_GUI_CreateText(RG_GUI_JV_PREFIX+"PG","PAGE "+IntegerToString(g_RG_GUI_JournalConfigPage+1)+" / "+IntegerToString(maxPage+1),inner+RG_GUI_S(136),addY+RG_GUI_S(5),RG_GUI_MUTED,RG_GUI_FS(7),RG_GUI_Z_TEXT+30);
+   ObjectSetInteger(0,RG_GUI_JV_ADD,OBJPROP_FONTSIZE,RG_GUI_FS(6));
+   ObjectSetInteger(0,RG_GUI_JV_PREV,OBJPROP_FONTSIZE,RG_GUI_FS(6));
+   ObjectSetInteger(0,RG_GUI_JV_NEXT,OBJPROP_FONTSIZE,RG_GUI_FS(6));
+   RG_GUI_CreateText(RG_GUI_JV_PREFIX+"PG","PAGE "+IntegerToString(g_RG_GUI_JournalConfigPage+1)+" / "+IntegerToString(maxPage+1),inner+RG_GUI_S(136),addY+RG_GUI_S(5),RG_GUI_MUTED,RG_GUI_FS(6),RG_GUI_Z_TEXT+30);
 }
 
 void RG_GUI_CreateJournalPanel(int x,int top,int pw)
@@ -5520,8 +5736,7 @@ void RG_GUI_CreateJournalPanel(int x,int top,int pw)
    RG_GUI_CreateButton(sec,g_RG_GUI_JournalOpen?"JOURNAL   [ - ]":"JOURNAL   [ + ]",x+RG_GUI_S(8),secY,pw-RG_GUI_S(16),RG_GUI_S(32),RG_GUI_HEADER_BG,RG_GUI_YELLOW,RG_GUI_Z_BUTTON+900);
    ObjectSetInteger(0,sec,OBJPROP_FONTSIZE,RG_GUI_FS(10));
    if(!g_RG_GUI_JournalOpen) return;
-   int y=secY+RG_GUI_S(42); int trades=0,wins=0,losses=0; double net=0.0; RG_GUI_JournalStats(trades,wins,losses,net);
-   RG_GUI_CreateText(RG_GUI_JournalSummaryName(),"TRADES: "+IntegerToString(trades)+"  W: "+IntegerToString(wins)+"  L: "+IntegerToString(losses)+"  NET: "+DoubleToString(net,2),x+RG_GUI_S(12),y,net>=0.0?RG_GUI_GREEN:RG_GUI_RED,RG_GUI_FS(8),RG_GUI_Z_TEXT+30);
+   ObjectDelete(0,RG_GUI_JournalSummaryName());
 }
 
 void RG_GUI_ToggleJournal()
@@ -5717,7 +5932,7 @@ void RG_GUI_CreateToolsPanel()
    int pw=w;
 
    int sessionH=(g_RG_GUI_SessionsOpen ? RG_GUI_S(138) : RG_GUI_S(44));
-   int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(360) : RG_GUI_S(48));
+   int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(396) : RG_GUI_S(48));
    int newsH=RG_GUI_S(176);
    if(!g_RG_GUI_NewsOpen) newsH=RG_GUI_S(42);
    else if(g_RG_GUI_NewsSelector==2) newsH=RG_GUI_S(286);
@@ -5800,7 +6015,21 @@ void RG_GUI_CreateToolsPanel()
       ObjectSetInteger(0,lmn,OBJPROP_FONTSIZE,RG_GUI_FS(8));
 
       int rowH=RG_GUI_S(48);
-      int rowY=specialTop+RG_GUI_S(112);
+      string clearPast=RG_GUI_TOOLS_PREFIX+"CLEAR_PAST_SPECIAL_TIMES";
+      RG_GUI_CreateButton(
+         clearPast,
+         "CLEAR PAST SPECIAL TIMES",
+         x+RG_GUI_S(10),
+         ctrlY+RG_GUI_S(36),
+         pw-RG_GUI_S(20),
+         RG_GUI_S(28),
+         clrMaroon,
+         clrWhite,
+         RG_GUI_Z_BUTTON+800
+      );
+      ObjectSetInteger(0,clearPast,OBJPROP_FONTSIZE,RG_GUI_FS(8));
+
+      int rowY=specialTop+RG_GUI_S(148);
       int colGap=RG_GUI_S(10);
       int colW=(pw-RG_GUI_S(20)-colGap)/2;
       if(colW<170) colW=170;
@@ -6176,9 +6405,29 @@ void RG_GUI_UpdateToolsPanel()
       }
    }
 
+   sn=RG_GUI_SessionControlName("PAST_VALUE");
+   if(ObjectFind(0,sn)>=0)
+   {
+      ObjectSetString(0,sn,OBJPROP_TEXT,g_RG_GUI_SessionsPast ? "ON" : "OFF");
+      ObjectSetInteger(0,sn,OBJPROP_BGCOLOR,g_RG_GUI_SessionsPast ? RG_GUI_GREEN : RG_GUI_HEADER_BG);
+      ObjectSetInteger(0,sn,OBJPROP_COLOR,g_RG_GUI_SessionsPast ? clrBlack : RG_GUI_TEXT);
+   }
+
+   sn=RG_GUI_SessionControlName("FUTURE_ON_VALUE");
+   if(ObjectFind(0,sn)>=0)
+   {
+      ObjectSetString(0,sn,OBJPROP_TEXT,g_RG_GUI_SessionsFutureEnabled ? "ON" : "OFF");
+      ObjectSetInteger(0,sn,OBJPROP_BGCOLOR,g_RG_GUI_SessionsFutureEnabled ? RG_GUI_GREEN : RG_GUI_HEADER_BG);
+      ObjectSetInteger(0,sn,OBJPROP_COLOR,g_RG_GUI_SessionsFutureEnabled ? clrBlack : RG_GUI_TEXT);
+   }
+
    sn=RG_GUI_SessionControlName("FUTURE_VALUE");
    if(ObjectFind(0,sn)>=0)
+   {
       ObjectSetString(0,sn,OBJPROP_TEXT,IntegerToString(g_RG_GUI_SessionsFuture));
+      ObjectSetInteger(0,sn,OBJPROP_BGCOLOR,RG_GUI_HEADER_BG);
+      ObjectSetInteger(0,sn,OBJPROP_COLOR,RG_GUI_TEXT);
+   }
 
    sn=RG_GUI_SessionControlName("LABELS_VALUE");
    if(ObjectFind(0,sn)>=0)
@@ -6379,7 +6628,7 @@ bool RG_CreatePanel()
 
    if(g_RG_GUI_ToolsOpen)
    {
-         int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(360) : RG_GUI_S(48));
+         int specialH=(g_RG_GUI_SpecialTimesOpen ? RG_GUI_S(396) : RG_GUI_S(48));
       int newsH=RG_GUI_S(176);
       if(!g_RG_GUI_NewsOpen) newsH=RG_GUI_S(42);
       
@@ -6434,7 +6683,7 @@ bool RG_CreatePanel()
 
    if(g_RG_GUI_JournalTabOpen)
    {
-      int journalH=RG_GUI_S(360);
+      int journalH=RG_GUI_S(400);
       L.panelH=RG_GUI_HEADER_H+RG_GUI_TAB_H+RG_GUI_S(4)+journalH+RG_GUI_S(8);
       RG_GUI_CreateJournalTabPanel(x,y+RG_GUI_HEADER_H+RG_GUI_TAB_H+RG_GUI_S(10),w,journalH);
       g_RG_GUI_LastChartWidth=

@@ -6,8 +6,8 @@
 //
 // - 10 daily events
 // - Broker server time (TimeCurrent)
-// - current trading day only
-// - hide events more than 30 minutes in the past
+// - retain the previous 7 days of event markers
+// - remove history only after it is older than 7 days
 // - visible only on M1 / M5 / M15 / H1
 // - event marker is aligned to the actual chart time axis
 // - bottom timeline is chart-anchored and never moves with GUI panel
@@ -55,6 +55,18 @@ input string RG_ST_10_Time="23:55"; input string RG_ST_10_Label="MARKET CLOSE"; 
 struct RG_ST_Event { bool enabled; string hhmm; string label; color textColor; int minutes; };
 RG_ST_Event g_RG_ST_Events[10];
 bool g_RG_ST_Initialized=false;
+bool g_RG_ST_PastCleared=false;
+
+int RG_ST_TodayKey()
+{
+   datetime now=TimeCurrent();
+   return(TimeYear(now)*10000+TimeMonth(now)*100+TimeDay(now));
+}
+
+string RG_ST_PastClearedGV()
+{
+   return(RG_ST_ModeGV("PAST_CLEARED_DAY"));
+}
 RG_ST_DisplayWindowMode g_RG_ST_DisplayWindowMode=RG_ST_DISPLAY_MAIN_CHART;
 RG_ST_LabelDisplayMode g_RG_ST_LabelDisplayMode=RG_ST_LABEL_TIME_AND_LABEL;
 int g_RG_ST_LastWidth=0;
@@ -291,18 +303,19 @@ void RG_ST_LoadEvents()
 bool RG_ST_TimeframeAllowed()
 {
    int tf=Period();
-   return(tf==PERIOD_M1 || tf==PERIOD_M5 || tf==PERIOD_M15 || tf==PERIOD_H1);
+   return(tf==PERIOD_M1 || tf==PERIOD_M5 || tf==PERIOD_M15);
 }
 
 void RG_ST_DeleteObjects()
 {
-   if(ObjectFind(0,RG_ST_BAR)>=0) ObjectDelete(0,RG_ST_BAR);
-   for(int i=0;i<10;i++)
+   // Remove all objects owned by Special Times from EVERY chart subwindow,
+   // including dated historical occurrences. Objects in indicator windows must
+   // also be deleted when the timeframe is not allowed. This is used only when the feature is disabled or hidden
+   // by the project's timeframe rules, or when the user explicitly resets it.
+   for(int n=ObjectsTotal(0,-1,-1)-1;n>=0;n--)
    {
-      string a=RG_ST_EVENT_PREFIX+IntegerToString(i+1);
-      string b=RG_ST_MARK_PREFIX+IntegerToString(i+1);
-      if(ObjectFind(0,a)>=0)ObjectDelete(0,a);
-      if(ObjectFind(0,b)>=0)ObjectDelete(0,b);
+      string name=ObjectName(0,n,-1,-1);
+      if(StringFind(name,RG_ST_PREFIX,0)==0) ObjectDelete(0,name);
    }
 }
 
@@ -344,12 +357,21 @@ int RG_ST_LabelWidth(string text)
    return(w);
 }
 
+string RG_ST_DateSuffix(datetime dt)
+{
+   return(IntegerToString(TimeYear(dt))+StringFormat("%02d",TimeMonth(dt))+StringFormat("%02d",TimeDay(dt)));
+}
+
 void RG_ST_DeleteEventObject(int i)
 {
-   string a=RG_ST_EVENT_PREFIX+IntegerToString(i+1);
-   string b=RG_ST_MARK_PREFIX+IntegerToString(i+1);
-   if(ObjectFind(0,a)>=0) ObjectDelete(0,a);
-   if(ObjectFind(0,b)>=0) ObjectDelete(0,b);
+   // Historical occurrences are date-suffixed; stale ones are pruned in DrawEvents.
+   string baseA=RG_ST_EVENT_PREFIX+IntegerToString(i+1)+"_";
+   string baseB=RG_ST_MARK_PREFIX+IntegerToString(i+1)+"_";
+   for(int n=ObjectsTotal(0,-1,-1)-1;n>=0;n--)
+   {
+      string name=ObjectName(0,n,-1,-1);
+      if(StringFind(name,baseA,0)==0 || StringFind(name,baseB,0)==0) ObjectDelete(0,name);
+   }
 }
 
 void RG_ST_DrawEvents()
@@ -359,78 +381,90 @@ void RG_ST_DrawEvents()
    datetime now=TimeCurrent();
    int secIntoDay=TimeHour(now)*3600+TimeMinute(now)*60+TimeSeconds(now);
    datetime todayStart=now-secIntoDay;
-   datetime todayEnd=todayStart+86400;
+   datetime oldestDay=todayStart-6*86400; // keep today plus the previous six days
+   datetime cutoff=todayStart-7*86400;    // weekly cleanup boundary
+
+   // Remove only dated Special Times objects older than the seven-day retention
+   // window. Do not remove an event merely because its scheduled time has passed.
+   for(int n=ObjectsTotal(0,-1,-1)-1;n>=0;n--)
+   {
+      string obj=ObjectName(0,n,-1,-1);
+      if(StringFind(obj,RG_ST_EVENT_PREFIX,0)!=0 && StringFind(obj,RG_ST_MARK_PREFIX,0)!=0) continue;
+      int nameLen=StringLen(obj);
+      if(nameLen<8) { ObjectDelete(0,obj); continue; }
+      string ds=StringSubstr(obj,nameLen-8,8);
+      if(StringLen(ds)==8)
+      {
+         int yy=(int)StringToInteger(StringSubstr(ds,0,4));
+         int mm=(int)StringToInteger(StringSubstr(ds,4,2));
+         int dd=(int)StringToInteger(StringSubstr(ds,6,2));
+         if(yy>1970 && mm>=1 && mm<=12 && dd>=1 && dd<=31)
+         {
+            string dateText=StringFormat("%04d.%02d.%02d",yy,mm,dd);
+            datetime objectDay=StringToTime(dateText);
+            if(objectDay>0 && objectDay<cutoff) ObjectDelete(0,obj);
+         }
+      }
+   }
 
    for(int i=0;i<10;i++)
    {
-      if(!g_RG_ST_Events[i].enabled)
-      { RG_ST_DeleteEventObject(i); continue; }
-
-      datetime dt=0;
-      if(!RG_ST_EventDateTime(g_RG_ST_Events[i].minutes,dt) ||
-         dt<todayStart || dt>=todayEnd || dt<(now-1800))
-      { RG_ST_DeleteEventObject(i); continue; }
-
-      // Native vertical line: event position is tied to the actual chart time.
-      // Display can be placed either on the main chart or the first indicator subwindow.
-      int targetWindow=(g_RG_ST_DisplayWindowMode==RG_ST_DISPLAY_FIRST_INDICATOR ? 1 : 0);
-      string mark=RG_ST_MARK_PREFIX+IntegerToString(i+1);
-      if(ObjectFind(0,mark)<0)
-         ObjectCreate(0,mark,OBJ_VLINE,targetWindow,dt,0);
-      else
+      if(!g_RG_ST_Events[i].enabled) { RG_ST_DeleteEventObject(i); continue; }
+      for(int day=0;day<7;day++)
       {
-         ObjectSetInteger(0,mark,OBJPROP_TIME1,dt);
+         if(g_RG_ST_PastCleared && day>0) continue;
+         datetime dayStart=todayStart-day*86400;
+         datetime dt=dayStart+g_RG_ST_Events[i].minutes*60;
+         if(dt<oldestDay || dt>now+86400) continue;
+         string suffix=RG_ST_DateSuffix(dt);
+         string mark=RG_ST_MARK_PREFIX+IntegerToString(i+1)+"_"+suffix;
+         string name=RG_ST_EVENT_PREFIX+IntegerToString(i+1)+"_"+suffix;
+         int targetWindow=(g_RG_ST_DisplayWindowMode==RG_ST_DISPLAY_FIRST_INDICATOR ? 1 : 0);
+         if(ObjectFind(0,mark)<0) ObjectCreate(0,mark,OBJ_VLINE,targetWindow,dt,0);
+         else ObjectSetInteger(0,mark,OBJPROP_TIME1,dt);
+         ObjectSetInteger(0,mark,OBJPROP_COLOR,g_RG_ST_Events[i].textColor);
+         ObjectSetInteger(0,mark,OBJPROP_STYLE,STYLE_DOT);
+         ObjectSetInteger(0,mark,OBJPROP_WIDTH,1);
+         ObjectSetInteger(0,mark,OBJPROP_SELECTABLE,false);
+         ObjectSetInteger(0,mark,OBJPROP_SELECTED,false);
+         ObjectSetInteger(0,mark,OBJPROP_HIDDEN,true);
+         ObjectSetInteger(0,mark,OBJPROP_BACK,true);
+         ObjectSetInteger(0,mark,OBJPROP_ZORDER,100);
+
+         double topPrice=WindowPriceMax(targetWindow);
+         double bottomPrice=WindowPriceMin(targetWindow);
+         if(topPrice<=bottomPrice) continue;
+         int level=i%4;
+         double range=topPrice-bottomPrice;
+         double labelPrice=bottomPrice+(range*(0.04+(level*0.045)));
+         string display=(g_RG_ST_LabelDisplayMode==RG_ST_LABEL_TIME_ONLY ?
+                         RG_ST_TimeText(g_RG_ST_Events[i].minutes) :
+                         g_RG_ST_Events[i].label+" "+RG_ST_TimeText(g_RG_ST_Events[i].minutes));
+         if(ObjectFind(0,name)<0) ObjectCreate(0,name,OBJ_TEXT,targetWindow,dt,labelPrice);
+         else { ObjectSetInteger(0,name,OBJPROP_TIME1,dt); ObjectSetDouble(0,name,OBJPROP_PRICE1,labelPrice); }
+         ObjectSetString(0,name,OBJPROP_TEXT,display);
+         ObjectSetString(0,name,OBJPROP_FONT,RG_ST_Font);
+         ObjectSetInteger(0,name,OBJPROP_FONTSIZE,RG_ST_FontSize<7?7:RG_ST_FontSize);
+         ObjectSetInteger(0,name,OBJPROP_COLOR,g_RG_ST_Events[i].textColor);
+         ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_LEFT_LOWER);
+         ObjectSetDouble(0,name,OBJPROP_ANGLE,90.0);
+         ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+         ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+         ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+         ObjectSetInteger(0,name,OBJPROP_BACK,false);
+         ObjectSetInteger(0,name,OBJPROP_ZORDER,120);
       }
-
-      ObjectSetInteger(0,mark,OBJPROP_COLOR,g_RG_ST_Events[i].textColor);
-      ObjectSetInteger(0,mark,OBJPROP_STYLE,STYLE_DOT);
-      ObjectSetInteger(0,mark,OBJPROP_WIDTH,1);
-      ObjectSetInteger(0,mark,OBJPROP_SELECTABLE,false);
-      ObjectSetInteger(0,mark,OBJPROP_SELECTED,false);
-      ObjectSetInteger(0,mark,OBJPROP_HIDDEN,true);
-      ObjectSetInteger(0,mark,OBJPROP_BACK,true);
-      ObjectSetInteger(0,mark,OBJPROP_ZORDER,100);
-
-      // Vertical label is drawn in the same target window, near the bottom edge.
-      // Label mode can show either Time + Label or Time Only.
-      string name=RG_ST_EVENT_PREFIX+IntegerToString(i+1);
-      double topPrice=WindowPriceMax(targetWindow);
-      double bottomPrice=WindowPriceMin(targetWindow);
-      if(topPrice<=bottomPrice)
-      { RG_ST_DeleteEventObject(i); continue; }
-
-      // Stagger labels upward slightly from the bottom edge to reduce overlap.
-      int level=i%4;
-      double range=topPrice-bottomPrice;
-      double labelPrice=bottomPrice+(range*(0.04+(level*0.045)));
-      string display=(g_RG_ST_LabelDisplayMode==RG_ST_LABEL_TIME_ONLY ?
-                      RG_ST_TimeText(g_RG_ST_Events[i].minutes) :
-                      g_RG_ST_Events[i].label+" "+RG_ST_TimeText(g_RG_ST_Events[i].minutes));
-
-      if(ObjectFind(0,name)<0)
-         ObjectCreate(0,name,OBJ_TEXT,targetWindow,dt,labelPrice);
-      else
-      {
-         ObjectSetInteger(0,name,OBJPROP_TIME1,dt);
-         ObjectSetDouble(0,name,OBJPROP_PRICE1,labelPrice);
-      }
-
-      ObjectSetString(0,name,OBJPROP_TEXT,display);
-      ObjectSetString(0,name,OBJPROP_FONT,RG_ST_Font);
-      ObjectSetInteger(0,name,OBJPROP_FONTSIZE,RG_ST_FontSize<7?7:RG_ST_FontSize);
-      ObjectSetInteger(0,name,OBJPROP_COLOR,g_RG_ST_Events[i].textColor);
-      ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_LEFT_LOWER);
-      ObjectSetDouble(0,name,OBJPROP_ANGLE,90.0);
-      ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
-      ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
-      ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
-      ObjectSetInteger(0,name,OBJPROP_BACK,false);
-      ObjectSetInteger(0,name,OBJPROP_ZORDER,120);
    }
 }
+
 void RG_SpecialTimesInit()
 {
    RG_ST_LoadEvents();
+   // Keep the user's clear-history action across MT4/EA restarts for the
+   // current broker-server day. A new day starts a fresh history window.
+   string clearedKey=RG_ST_PastClearedGV();
+   g_RG_ST_PastCleared=(GlobalVariableCheck(clearedKey) &&
+                        (int)GlobalVariableGet(clearedKey)==RG_ST_TodayKey());
    g_RG_ST_Initialized=true;
    if(!RG_ST_Enable || !RG_ST_TimeframeAllowed()){RG_ST_DeleteObjects();return;}
    RG_ST_DrawEvents();
@@ -453,6 +487,37 @@ void RG_SpecialTimesUpdate()
       RG_ST_DeleteObjects();RG_ST_DrawEvents();ChartRedraw();return;
    }
    RG_ST_DrawEvents();
+}
+
+
+// Delete historical Special Times occurrences before today. Today's and future
+// occurrences remain and will be recreated by the normal updater if needed.
+void RG_SpecialTimesClearPast()
+{
+   datetime now=TimeCurrent();
+   int secIntoDay=TimeHour(now)*3600+TimeMinute(now)*60+TimeSeconds(now);
+   datetime todayStart=now-secIntoDay;
+
+   // Keep the clear operation persistent for the current EA session: otherwise
+   // the normal updater immediately recreates the deleted historical objects.
+   g_RG_ST_PastCleared=true;
+   GlobalVariableSet(RG_ST_PastClearedGV(),(double)RG_ST_TodayKey());
+
+   for(int n=ObjectsTotal(0,-1,-1)-1;n>=0;n--)
+   {
+      string obj=ObjectName(0,n,-1,-1);
+      if(StringFind(obj,RG_ST_EVENT_PREFIX,0)!=0 && StringFind(obj,RG_ST_MARK_PREFIX,0)!=0) continue;
+      int nameLen=StringLen(obj);
+      if(nameLen<8) continue;
+      string ds=StringSubstr(obj,nameLen-8,8);
+      int yy=(int)StringToInteger(StringSubstr(ds,0,4));
+      int mm=(int)StringToInteger(StringSubstr(ds,4,2));
+      int dd=(int)StringToInteger(StringSubstr(ds,6,2));
+      if(yy<1971 || mm<1 || mm>12 || dd<1 || dd>31) continue;
+      datetime objectDay=StringToTime(StringFormat("%04d.%02d.%02d",yy,mm,dd));
+      if(objectDay>0 && objectDay<todayStart) ObjectDelete(0,obj);
+   }
+   ChartRedraw();
 }
 
 void RG_SpecialTimesDelete(){RG_ST_DeleteObjects();g_RG_ST_Initialized=false;ChartRedraw();}

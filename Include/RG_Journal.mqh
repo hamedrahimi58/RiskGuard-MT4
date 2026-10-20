@@ -1,4 +1,4 @@
-#ifndef __RG_JOURNAL_MQH__
+﻿#ifndef __RG_JOURNAL_MQH__
 #define __RG_JOURNAL_MQH__
 
 //====================================================
@@ -15,15 +15,13 @@
 
 #define RG_JOURNAL_MAX_ITEMS 100
 #define RG_JOURNAL_SETTINGS_FILE "RiskGuard\\Journal\\JournalSettings.csv"
-#define RG_JOURNAL_SYNC_EVENT_ID 501
-
-string g_RG_JournalSettingsVersionKey="";
-double g_RG_JournalSettingsVersion=0.0;
-bool g_RG_JournalPendingSync=false;
 
 bool g_RG_JournalReady=false;
 int g_RG_JournalLastExportError=0;
 bool g_RG_JournalEnabled=true;
+// 0 = checklist before SET; 1 = checklist after order execution.
+int g_RG_JournalEntryMode=0;
+int g_RG_JournalAfterEntryTicket=0;
 
 struct RG_JournalListItem
 {
@@ -175,28 +173,37 @@ int RG_JournalNextId(RG_JournalListItem &a[],int count)
    return(mx+1);
 }
 
+bool RG_JournalHasPatternName(string n)
+{
+   for(int i=0;i<g_RG_JournalPatternCount;i++) if(g_RG_JournalPatterns[i].name==n) return(true);
+   return(false);
+}
+bool RG_JournalHasTriggerName(string n)
+{
+   for(int i=0;i<g_RG_JournalTriggerCount;i++) if(g_RG_JournalTriggers[i].name==n) return(true);
+   return(false);
+}
+bool RG_JournalHasConditionName(string n)
+{
+   for(int i=0;i<g_RG_JournalConditionCount;i++) if(g_RG_JournalConditions[i].name==n) return(true);
+   return(false);
+}
+
 void RG_JournalAddDefaults()
 {
-   // Lists are intentionally empty by default. Every trader defines
-   // their own Conditions / Patterns / Triggers.
+   // J05: seed every requested default that is missing.
+   // Existing user-defined entries are preserved and defaults are never duplicated.
+   string p[15]={"ELLIOTT WAVES","SWING BANDS","SWING I.F.S","QM I.F.S","PB","PB&CH-T","I.F.S(H)","TST","BPB","AB=CD","ReAB=CD","HARMONIC","CLASSIC","N.B.T","SURFFING"};
+   string t[7]={"RD","X","V.D.T","BREAKOUT","TREND LINE","AB=CD","TOUCH"};
+   string c[6]={"T.T.M","MA POSITION","NO ANTI AB=CD","NO ANTI BPB","NO ANTI RD","NO ANTI RALLY"};
+   for(int i=0;i<15;i++) if(!RG_JournalHasPatternName(p[i])) RG_JournalAddPatternNoSave(p[i]);
+   for(int j=0;j<7;j++) if(!RG_JournalHasTriggerName(t[j])) RG_JournalAddTriggerNoSave(t[j]);
+   for(int k=0;k<6;k++) if(!RG_JournalHasConditionName(c[k])) RG_JournalAddConditionNoSave(c[k]);
 }
 
-void RG_JournalPublishSettingsChanged()
-{
-   if(g_RG_JournalSettingsVersionKey=="")
-      g_RG_JournalSettingsVersionKey=RG_JournalGV("SETTINGS_VERSION");
-
-   g_RG_JournalSettingsVersion=TimeLocal()+((double)GetTickCount()/1000000.0);
-   GlobalVariableSet(g_RG_JournalSettingsVersionKey,g_RG_JournalSettingsVersion);
-
-   long cid=ChartFirst();
-   while(cid>=0)
-   {
-      if(cid!=ChartID())
-         EventChartCustom(cid,RG_JOURNAL_SYNC_EVENT_ID,0,0.0,"RG_JOURNAL_SETTINGS");
-      cid=ChartNext(cid);
-   }
-}
+int RG_JournalAddPatternNoSave(string n){ if(g_RG_JournalPatternCount>=RG_JOURNAL_MAX_ITEMS)return(-1); int i=g_RG_JournalPatternCount; g_RG_JournalPatterns[i].id=RG_JournalNextId(g_RG_JournalPatterns,g_RG_JournalPatternCount); g_RG_JournalPatterns[i].name=n; g_RG_JournalPatterns[i].selected=false; g_RG_JournalPatternCount++; return(i); }
+int RG_JournalAddTriggerNoSave(string n){ if(g_RG_JournalTriggerCount>=RG_JOURNAL_MAX_ITEMS)return(-1); int i=g_RG_JournalTriggerCount; g_RG_JournalTriggers[i].id=RG_JournalNextId(g_RG_JournalTriggers,g_RG_JournalTriggerCount); g_RG_JournalTriggers[i].name=n; g_RG_JournalTriggers[i].selected=false; g_RG_JournalTriggerCount++; return(i); }
+int RG_JournalAddConditionNoSave(string n){ if(g_RG_JournalConditionCount>=RG_JOURNAL_MAX_ITEMS)return(-1); int i=g_RG_JournalConditionCount; g_RG_JournalConditions[i].id=RG_JournalNextId(g_RG_JournalConditions,g_RG_JournalConditionCount); g_RG_JournalConditions[i].name=n; g_RG_JournalConditions[i].selected=false; g_RG_JournalConditionCount++; return(i); }
 
 void RG_JournalSaveSettings()
 {
@@ -207,70 +214,38 @@ void RG_JournalSaveSettings()
    for(int j=0;j<g_RG_JournalPatternCount;j++) FileWrite(h,"P",g_RG_JournalPatterns[j].id,g_RG_JournalPatterns[j].name);
    for(int k=0;k<g_RG_JournalTriggerCount;k++) FileWrite(h,"T",g_RG_JournalTriggers[k].id,g_RG_JournalTriggers[k].name);
    FileWrite(h,"E",g_RG_JournalEnabled?1:0,"");
-   FileFlush(h);
+   FileWrite(h,"M",g_RG_JournalEntryMode,"");
    FileClose(h);
-   RG_JournalPublishSettingsChanged();
 }
 
 void RG_JournalLoadSettings()
 {
    RG_JournalClearLists();
    int h=FileOpen(RG_JOURNAL_SETTINGS_FILE,FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
-   if(h==INVALID_HANDLE)
+   if(h!=INVALID_HANDLE)
    {
-      RG_JournalSaveSettings();
-      return;
+      if(!FileIsEnding(h)){ FileReadString(h); FileReadString(h); FileReadString(h); }
+      while(!FileIsEnding(h))
+      {
+         string typ=FileReadString(h); if(StringLen(typ)==0) break;
+         string sid=FileReadString(h); string name=FileReadString(h);
+         int id=(int)StrToInteger(sid);
+         if(typ=="C" && g_RG_JournalConditionCount<RG_JOURNAL_MAX_ITEMS){ g_RG_JournalConditions[g_RG_JournalConditionCount].id=id; g_RG_JournalConditions[g_RG_JournalConditionCount].name=RG_JournalClean(name); g_RG_JournalConditionCount++; }
+         else if(typ=="P" && g_RG_JournalPatternCount<RG_JOURNAL_MAX_ITEMS){ g_RG_JournalPatterns[g_RG_JournalPatternCount].id=id; g_RG_JournalPatterns[g_RG_JournalPatternCount].name=RG_JournalClean(name); g_RG_JournalPatternCount++; }
+         else if(typ=="T" && g_RG_JournalTriggerCount<RG_JOURNAL_MAX_ITEMS){ g_RG_JournalTriggers[g_RG_JournalTriggerCount].id=id; g_RG_JournalTriggers[g_RG_JournalTriggerCount].name=RG_JournalClean(name); g_RG_JournalTriggerCount++; }
+         else if(typ=="E") g_RG_JournalEnabled=(id!=0);
+         else if(typ=="M") g_RG_JournalEntryMode=(id==1?1:0);
+      }
+      FileClose(h);
    }
-
-   if(!FileIsEnding(h)){ FileReadString(h); FileReadString(h); FileReadString(h); }
-   while(!FileIsEnding(h))
-   {
-      string typ=FileReadString(h);
-      if(StringLen(typ)==0) break;
-      string sid=FileReadString(h);
-      string name=FileReadString(h);
-      int id=(int)StrToInteger(sid);
-      if(typ=="C" && g_RG_JournalConditionCount<RG_JOURNAL_MAX_ITEMS)
-      {
-         g_RG_JournalConditions[g_RG_JournalConditionCount].id=id;
-         g_RG_JournalConditions[g_RG_JournalConditionCount].name=RG_JournalClean(name);
-         g_RG_JournalConditionCount++;
-      }
-      else if(typ=="P" && g_RG_JournalPatternCount<RG_JOURNAL_MAX_ITEMS)
-      {
-         g_RG_JournalPatterns[g_RG_JournalPatternCount].id=id;
-         g_RG_JournalPatterns[g_RG_JournalPatternCount].name=RG_JournalClean(name);
-         g_RG_JournalPatternCount++;
-      }
-      else if(typ=="T" && g_RG_JournalTriggerCount<RG_JOURNAL_MAX_ITEMS)
-      {
-         g_RG_JournalTriggers[g_RG_JournalTriggerCount].id=id;
-         g_RG_JournalTriggers[g_RG_JournalTriggerCount].name=RG_JournalClean(name);
-         g_RG_JournalTriggerCount++;
-      }
-      else if(typ=="E") g_RG_JournalEnabled=(id!=0);
-   }
-   FileClose(h);
-
-   if(g_RG_JournalSettingsVersionKey=="")
-      g_RG_JournalSettingsVersionKey=RG_JournalGV("SETTINGS_VERSION");
-   if(GlobalVariableCheck(g_RG_JournalSettingsVersionKey))
-      g_RG_JournalSettingsVersion=GlobalVariableGet(g_RG_JournalSettingsVersionKey);
-}
-
-void RG_JournalHandleSettingsSync()
-{
-   if(g_RG_JournalSettingsVersionKey=="")
-      g_RG_JournalSettingsVersionKey=RG_JournalGV("SETTINGS_VERSION");
-
-   double v=GlobalVariableCheck(g_RG_JournalSettingsVersionKey) ? GlobalVariableGet(g_RG_JournalSettingsVersionKey) : 0.0;
-   if(v<=g_RG_JournalSettingsVersion) return;
-
-   g_RG_JournalPendingSync=false;
-   RG_JournalLoadSettings();
+   RG_JournalAddDefaults();
+   RG_JournalSaveSettings();
 }
 
 bool RG_JournalEnabled(){ return(g_RG_JournalEnabled); }
+int RG_JournalEntryMode(){ return(g_RG_JournalEntryMode); }
+void RG_JournalSetEntryMode(int mode){ g_RG_JournalEntryMode=(mode==1?1:0); RG_JournalSaveSettings(); }
+void RG_JournalToggleEntryMode(){ RG_JournalSetEntryMode(g_RG_JournalEntryMode==0?1:0); }
 void RG_JournalToggleEnabled(){ g_RG_JournalEnabled=!g_RG_JournalEnabled; RG_JournalSaveSettings(); }
 
 int RG_JournalAddCondition(string n){ if(g_RG_JournalConditionCount>=RG_JOURNAL_MAX_ITEMS)return(-1); n=RG_JournalClean(n); if(n=="")return(-1); int i=g_RG_JournalConditionCount; g_RG_JournalConditions[i].id=RG_JournalNextId(g_RG_JournalConditions,g_RG_JournalConditionCount); g_RG_JournalConditions[i].name=n; g_RG_JournalConditionCount++; RG_JournalSaveSettings(); return(i); }
@@ -306,7 +281,31 @@ void RG_JournalBeginPreview(int direction)
 {
    RG_JournalChecklistReset();
    g_RG_JournalPreviewDirection=direction;
-   g_RG_JournalPreviewOpen=g_RG_JournalEnabled;
+   g_RG_JournalPreviewOpen=(g_RG_JournalEnabled && g_RG_JournalEntryMode==0);
+}
+void RG_JournalBeginAfterEntry(int ticket,int direction)
+{
+   RG_JournalChecklistReset();
+   g_RG_JournalPreviewDirection=direction;
+   g_RG_JournalAfterEntryTicket=ticket;
+   g_RG_JournalPreviewOpen=(g_RG_JournalEnabled && g_RG_JournalEntryMode==1 && ticket>0);
+}
+int RG_JournalFinishAfterEntry(bool saveSelection)
+{
+   int ticket=g_RG_JournalAfterEntryTicket;
+   if(ticket>0 && g_RG_JournalEnabled)
+   {
+      bool selected=OrderSelect(ticket,SELECT_BY_TICKET,MODE_TRADES);
+      if(!selected) selected=OrderSelect(ticket,SELECT_BY_TICKET,MODE_HISTORY);
+      if(selected)
+      {
+         if(!saveSelection) RG_JournalChecklistReset();
+         RG_JournalAttachEntryMeta(ticket,OrderOpenPrice(),OrderStopLoss(),OrderTakeProfit(),OrderLots());
+      }
+   }
+   g_RG_JournalAfterEntryTicket=0;
+   g_RG_JournalPreviewOpen=false;
+   return(ticket);
 }
 void RG_JournalEndPreview(){ g_RG_JournalPreviewOpen=false; }
 bool RG_JournalPreviewIsOpen(){ return(g_RG_JournalPreviewOpen); }
@@ -334,7 +333,41 @@ string RG_JournalSelectedTFs()
    if(s=="")s="NONE";
    return(s);
 }
-string RG_JournalPreviewConditions(){ string s=""; for(int i=0;i<g_RG_JournalConditionCount;i++) if(g_RG_JournalPreviewConditions[i]){if(s!="")s+=" | ";s+=g_RG_JournalConditions[i].name;} if(s=="")s="NONE"; return(s); }
+string RG_JournalCheckMark()
+{
+   return(ShortToString(10003));
+}
+string RG_JournalCrossMark()
+{
+   return(ShortToString(10007));
+}
+
+// Store a plain ASCII token in CSV metadata. Unicode checkmarks can be
+// corrupted by MT4 CSV/ANSI conversions, which made every condition appear
+// unchecked in Excel. Convert to glyphs only at presentation time.
+bool RG_JournalConditionIsComplete(string value)
+{
+   StringTrimLeft(value);
+   StringTrimRight(value);
+   if(value=="CHECK" || value=="Y" || value=="YES" || value=="TRUE" || value=="1")
+      return(true);
+   if(value==RG_JournalCheckMark()) return(true);
+   return(false);
+}
+
+string RG_JournalConditionMark(string value)
+{
+   return(RG_JournalConditionIsComplete(value) ? RG_JournalCheckMark() : RG_JournalCrossMark());
+}
+
+string RG_JournalPreviewConditions()
+{
+   // Durable ASCII value; presentation layers render the actual symbol.
+   if(g_RG_JournalConditionCount<=0) return("CROSS");
+   for(int i=0;i<g_RG_JournalConditionCount;i++)
+      if(!g_RG_JournalPreviewConditions[i]) return("CROSS");
+   return("CHECK");
+}
 string RG_JournalPreviewStatus(){
    bool any=(g_RG_JournalPreviewRR||g_RG_JournalPreviewVolume||g_RG_JournalPreviewSL||g_RG_JournalPreviewTP);
    for(int i=0;i<g_RG_JournalConditionCount;i++) if(g_RG_JournalPreviewConditions[i]) { any=true; break; }
@@ -358,18 +391,166 @@ void RG_JournalAttachEntryMeta(int ticket,double entry,double sl,double tp,doubl
    // Strings cannot be stored in MT4 Global Variables. Use terminal GlobalVariables for indices/numerics and a compact file for text.
    int h=FileOpen(RG_JOURNAL_FOLDER+"\\Meta_"+IntegerToString(ticket)+".csv",FILE_CSV|FILE_WRITE|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
    if(h==INVALID_HANDLE)return;
-   FileWrite(h,RG_JournalJoinSelected(g_RG_JournalPatterns,g_RG_JournalPatternCount,g_RG_JournalPreviewPatterns),RG_JournalJoinSelected(g_RG_JournalTriggers,g_RG_JournalTriggerCount,g_RG_JournalPreviewTriggers),RG_JournalSelectedTFs(),RG_JournalPreviewConditions(),RG_JournalPreviewStatus(),(g_RG_JournalPreviewVolume?DoubleToString(lots,2):""),(g_RG_JournalPreviewRR?RG_JournalRRText(entry,sl,tp):""),RG_JournalPreviewFlags());
+   // Entry facts are always stored. The checklist checkboxes must not decide
+   // whether actual R/R and Volume are written to the Journal.
+   FileWrite(h,
+      RG_JournalJoinSelected(g_RG_JournalPatterns,g_RG_JournalPatternCount,g_RG_JournalPreviewPatterns),
+      RG_JournalJoinSelected(g_RG_JournalTriggers,g_RG_JournalTriggerCount,g_RG_JournalPreviewTriggers),
+      RG_JournalSelectedTFs(),
+      RG_JournalPreviewConditions(),
+      RG_JournalPreviewStatus(),
+      DoubleToString(lots,2),
+      RG_JournalRRText(entry,sl,tp),
+      RG_JournalPreviewFlags()
+   );
    FileClose(h);
+}
+
+bool RG_JournalReadMetaFromJournal(int ticket,string &pattern,string &trigger,string &tf,string &conditions,string &status,string &lots,string &rr,string &flags)
+{
+   int h=FileOpen(RG_JOURNAL_FILE,FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
+   if(h==INVALID_HANDLE) return(false);
+   bool found=false;
+   while(!FileIsEnding(h))
+   {
+      string cols[32];
+      cols[0]=FileReadString(h);
+      if(cols[0]=="" && FileIsEnding(h)) break;
+      for(int c=1;c<32;c++) cols[c]=FileReadString(h);
+      if((cols[0]=="OPEN" || cols[0]=="CLOSE") && (int)StrToInteger(cols[1])==ticket)
+      {
+         // These are the stable metadata columns written by both OPEN and CLOSE rows.
+         if(cols[24]!="" && cols[24]!="NONE") pattern=cols[24];
+         if(cols[25]!="" && cols[25]!="NONE") trigger=cols[25];
+         if(cols[26]!="" && cols[26]!="NONE") tf=cols[26];
+         if(cols[27]!="" && cols[27]!="NONE") conditions=cols[27];
+         if(cols[28]!="" && cols[28]!="NONE") status=cols[28];
+         if(cols[29]!="") rr=cols[29];
+         if(cols[30]!="") lots=cols[30];
+         if(cols[31]!="") flags=cols[31];
+         bool rowHasMeta=(cols[24]!="" && cols[24]!="NONE") ||
+                         (cols[25]!="" && cols[25]!="NONE") ||
+                         (cols[26]!="" && cols[26]!="NONE") ||
+                         (cols[27]!="" && cols[27]!="NONE") ||
+                         cols[30]!="";
+         if(rowHasMeta) found=true;
+         // Prefer a useful OPEN snapshot; otherwise keep scanning CLOSE rows.
+         if(cols[0]=="OPEN" && rowHasMeta) { FileClose(h); return(true); }
+      }
+   }
+   FileClose(h);
+   return(found);
 }
 
 bool RG_JournalReadMeta(int ticket,string &pattern,string &trigger,string &tf,string &conditions,string &status,string &lots,string &rr,string &flags)
 {
    pattern="";trigger="";tf="";conditions="";status="";lots="";rr="";flags="";
    int h=FileOpen(RG_JOURNAL_FOLDER+"\\Meta_"+IntegerToString(ticket)+".csv",FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
-   if(h==INVALID_HANDLE)return(false);
-   pattern=FileReadString(h); trigger=FileReadString(h); tf=FileReadString(h); conditions=FileReadString(h); status=FileReadString(h); lots=FileReadString(h); rr=FileReadString(h); flags=FileReadString(h); FileClose(h); return(true);
+   if(h!=INVALID_HANDLE)
+   {
+      pattern=FileReadString(h); trigger=FileReadString(h); tf=FileReadString(h); conditions=FileReadString(h); status=FileReadString(h); lots=FileReadString(h); rr=FileReadString(h); flags=FileReadString(h); FileClose(h);
+   }
+   // Metadata can be appended to Journal.csv before/after the per-ticket file is
+   // available. Recover entry-time selections from the durable journal row.
+   if(pattern=="" || pattern=="NONE" || trigger=="" || trigger=="NONE" || conditions=="" || conditions=="NONE" || lots=="")
+      RG_JournalReadMetaFromJournal(ticket,pattern,trigger,tf,conditions,status,lots,rr,flags);
+   return(pattern!="" || trigger!="" || tf!="" || conditions!="" || lots!="" || rr!="" || flags!="");
 }
 void RG_JournalDeleteMeta(int ticket){ string f=RG_JOURNAL_FOLDER+"\\Meta_"+IntegerToString(ticket)+".csv"; if(FileIsExist(f))FileDelete(f); }
+
+string RG_JournalStateFile(int ticket)
+{
+   return(RG_JOURNAL_FOLDER+"\\State_"+IntegerToString(ticket)+".csv");
+}
+
+void RG_JournalStateDefaults(string &originalLots,string &lastLots,string &originalSL,string &lastSL,string &partialText,string &slMoveText)
+{
+   originalLots=""; lastLots=""; originalSL=""; lastSL=""; partialText=""; slMoveText="";
+}
+
+bool RG_JournalReadState(int ticket,string &originalLots,string &lastLots,string &originalSL,string &lastSL,string &partialText,string &slMoveText)
+{
+   RG_JournalStateDefaults(originalLots,lastLots,originalSL,lastSL,partialText,slMoveText);
+   int h=FileOpen(RG_JournalStateFile(ticket),FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
+   if(h==INVALID_HANDLE) return(false);
+   originalLots=FileReadString(h);
+   lastLots=FileReadString(h);
+   originalSL=FileReadString(h);
+   lastSL=FileReadString(h);
+   partialText=FileReadString(h);
+   slMoveText=FileReadString(h);
+   FileClose(h);
+   return(true);
+}
+
+void RG_JournalWriteState(int ticket,string originalLots,string lastLots,string originalSL,string lastSL,string partialText,string slMoveText)
+{
+   if(ticket<=0) return;
+   int h=FileOpen(RG_JournalStateFile(ticket),FILE_CSV|FILE_WRITE|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
+   if(h==INVALID_HANDLE) return;
+   FileWrite(h,originalLots,lastLots,originalSL,lastSL,partialText,slMoveText);
+   FileClose(h);
+}
+
+void RG_JournalTrackOpenState(int ticket)
+{
+   if(ticket<=0 || !OrderSelect(ticket,SELECT_BY_TICKET,MODE_TRADES) || !RG_JournalIsMarketType(OrderType())) return;
+
+   string originalLots,lastLots,originalSL,lastSL,partialText,slMoveText;
+   bool exists=RG_JournalReadState(ticket,originalLots,lastLots,originalSL,lastSL,partialText,slMoveText);
+   int digits=(int)MarketInfo(OrderSymbol(),MODE_DIGITS);
+   double lots=OrderLots();
+   double sl=OrderStopLoss();
+
+   if(!exists || originalLots=="")
+   {
+      originalLots=DoubleToString(lots,2);
+      lastLots=DoubleToString(lots,2);
+      originalSL=DoubleToString(sl,digits);
+      lastSL=DoubleToString(sl,digits);
+      RG_JournalWriteState(ticket,originalLots,lastLots,originalSL,lastSL,partialText,slMoveText);
+      return;
+   }
+
+   double prevLots=StrToDouble(lastLots);
+   double prevSL=StrToDouble(lastSL);
+   double lotStep=MarketInfo(OrderSymbol(),MODE_LOTSTEP);
+   if(lotStep<=0.0) lotStep=0.01;
+   bool changed=false;
+
+   if(lots < prevLots-0.5*lotStep)
+   {
+      double closed=prevLots-lots;
+      string item=DoubleToString(closed,2)+" lots";
+      if(partialText!="") partialText+=" | ";
+      partialText+=item;
+      changed=true;
+   }
+
+   double point=MarketInfo(OrderSymbol(),MODE_POINT);
+   if(sl>0.0 && prevSL>0.0 && point>0.0 && MathAbs(sl-prevSL)>point*0.5)
+   {
+      string item=DoubleToString(prevSL,digits)+" -> "+DoubleToString(sl,digits);
+      if(slMoveText!="") slMoveText+=" | ";
+      slMoveText+=item;
+      changed=true;
+   }
+   else if(sl>0.0 && prevSL<=0.0)
+   {
+      string item="0 -> "+DoubleToString(sl,digits);
+      if(slMoveText!="") slMoveText+=" | ";
+      slMoveText+=item;
+      changed=true;
+   }
+
+   string newLots=DoubleToString(lots,2);
+   string newSL=DoubleToString(sl,digits);
+   if(newLots!=lastLots || newSL!=lastSL) changed=true;
+   lastLots=newLots;
+   lastSL=newSL;
+   // Avoid rewriting the state file every timer cycle when nothing changed.
+   if(changed) RG_JournalWriteState(ticket,originalLots,lastLots,originalSL,lastSL,partialText,slMoveText);
+}
 
 string RG_JournalDescriptionFile(int ticket)
 {
@@ -412,55 +593,662 @@ void RG_JournalWriteHeader()
    FileClose(h);
 }
 
+void RG_JournalWarmKnownFlags()
+{
+   int h=FileOpen(RG_JOURNAL_FILE,FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
+   if(h==INVALID_HANDLE) return;
+   while(!FileIsEnding(h))
+   {
+      string ev=FileReadString(h);
+      if(StringLen(ev)==0 && FileIsEnding(h)) break;
+      string ts=FileReadString(h);
+      int ticket=(int)StrToInteger(ts);
+      if(ticket>0)
+      {
+         if(ev=="OPEN") GlobalVariableSet(RG_JournalGV("OPEN_"+IntegerToString(ticket)),1.0);
+         else if(ev=="CLOSE") GlobalVariableSet(RG_JournalGV("CLOSE_"+IntegerToString(ticket)),1.0);
+      }
+      for(int k=0;k<30;k++) FileReadString(h);
+   }
+   FileClose(h);
+}
+
+bool RG_JournalKnownFlag(string kind,int ticket)
+{
+   if(ticket<=0) return(false);
+   string key=RG_JournalGV(kind+"_"+IntegerToString(ticket));
+   if(GlobalVariableCheck(key) && GlobalVariableGet(key)>0.5) return(true);
+   return(false);
+}
+
+bool RG_JournalHasOpenRecord(int ticket)
+{
+   int h=FileOpen(RG_JOURNAL_FILE,FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
+   if(h==INVALID_HANDLE) return(false);
+   while(!FileIsEnding(h))
+   {
+      string ev=FileReadString(h);
+      if(StringLen(ev)==0 && FileIsEnding(h)) break;
+      string ts=FileReadString(h);
+      if(ev=="OPEN" && (int)StrToInteger(ts)==ticket)
+      {
+         FileClose(h);
+         return(true);
+      }
+      for(int k=0;k<30;k++) FileReadString(h);
+   }
+   FileClose(h);
+   return(false);
+}
+
 void RG_JournalAppendOpen(int ticket)
 {
    if(ticket<=0||!OrderSelect(ticket,SELECT_BY_TICKET,MODE_TRADES)||!RG_JournalIsMarketType(OrderType()))return;
-   string key=RG_JournalGV("OPEN_"+IntegerToString(ticket)); if(GlobalVariableCheck(key))return;
+   string key=RG_JournalGV("OPEN_"+IntegerToString(ticket));
+   if(RG_JournalKnownFlag("OPEN",ticket))
+   {
+      RG_JournalTrackOpenState(ticket);
+      return;
+   }
+   if(RG_JournalHasOpenRecord(ticket))
+   {
+      GlobalVariableSet(key,1.0);
+      RG_JournalTrackOpenState(ticket);
+      return;
+   }
+   RG_JournalTrackOpenState(ticket);
    datetime brokerOpen=OrderOpenTime(), systemOpen=RG_JournalBrokerToSystem(brokerOpen);
    string pattern,trigger,tf,conditions,status,metaLots,metaRR,metaFlags; RG_JournalReadMeta(ticket,pattern,trigger,tf,conditions,status,metaLots,metaRR,metaFlags);
    int h=FileOpen(RG_JOURNAL_FILE,FILE_CSV|FILE_READ|FILE_WRITE|FILE_SHARE_READ|FILE_SHARE_WRITE,';'); if(h==INVALID_HANDLE)return;
    FileSeek(h,0,SEEK_END);
    int digits=(int)MarketInfo(OrderSymbol(),MODE_DIGITS);
    FileWrite(h,"OPEN",ticket,OrderSymbol(),RG_JournalTypeName(OrderType()),RG_JournalDate(systemOpen),RG_JournalTime(systemOpen),TimeToString(brokerOpen,TIME_DATE|TIME_SECONDS),"",DoubleToString(OrderOpenPrice(),digits),"",DoubleToString(OrderStopLoss(),digits),DoubleToString(OrderTakeProfit(),digits),DoubleToString(OrderLots(),2),DoubleToString(RG_JournalRiskMoney(OrderSymbol(),OrderOpenPrice(),OrderStopLoss(),OrderLots()),2),DoubleToString(RG_JournalRR(OrderOpenPrice(),OrderStopLoss(),OrderTakeProfit()),2),RG_JournalSession(brokerOpen),"","","","",0,OrderMagicNumber(),OrderComment(),RG_JournalDay(systemOpen),pattern,trigger,tf,conditions,status,metaRR,metaLots,metaFlags);
-   FileClose(h); GlobalVariableSet(key,1.0); RG_JournalDeleteMeta(ticket);
+   FileClose(h); GlobalVariableSet(key,1.0);
 }
 
 void RG_JournalAppendClose(int ticket)
 {
    if(ticket<=0||!OrderSelect(ticket,SELECT_BY_TICKET,MODE_HISTORY)||!RG_JournalIsMarketType(OrderType()))return;
-   string key=RG_JournalGV("CLOSE_"+IntegerToString(ticket)); if(GlobalVariableCheck(key))return;
+   string key=RG_JournalGV("CLOSE_"+IntegerToString(ticket));
+   // Fast path: after initialization the Journal record is mirrored by a
+   // per-ticket flag, so normal timer scans do not repeatedly rescan Journal.csv.
+   if(RG_JournalKnownFlag("CLOSE",ticket)) return;
+   if(RG_JournalHasCloseRecord(ticket))
+   {
+      GlobalVariableSet(key,1.0);
+      return;
+   }
    datetime brokerClose=OrderCloseTime(), systemClose=RG_JournalBrokerToSystem(brokerClose);
+   string pattern,trigger,tf,conditions,status,metaLots,metaRR,metaFlags;
+   bool hasMeta=RG_JournalReadMeta(ticket,pattern,trigger,tf,conditions,status,metaLots,metaRR,metaFlags);
+   if(!hasMeta)
+   {
+      pattern="NONE"; trigger="NONE"; tf="NONE"; conditions="NONE"; status="NONE"; metaLots=""; metaRR="";
+   }
+   string stOriginalLots,stLastLots,stOriginalSL,stLastSL,stPartial,stSLMoves;
+   RG_JournalReadState(ticket,stOriginalLots,stLastLots,stOriginalSL,stLastSL,stPartial,stSLMoves);
    int h=FileOpen(RG_JOURNAL_FILE,FILE_CSV|FILE_READ|FILE_WRITE|FILE_SHARE_READ|FILE_SHARE_WRITE,';'); if(h==INVALID_HANDLE)return;
-   FileSeek(h,0,SEEK_END); int digits=(int)MarketInfo(OrderSymbol(),MODE_DIGITS); double net=OrderProfit()+OrderSwap()+OrderCommission(); long duration=(long)(OrderCloseTime()-OrderOpenTime());
-   FileWrite(h,"CLOSE",ticket,OrderSymbol(),RG_JournalTypeName(OrderType()),RG_JournalDate(systemClose),RG_JournalTime(systemClose),TimeToString(OrderOpenTime(),TIME_DATE|TIME_SECONDS),TimeToString(OrderCloseTime(),TIME_DATE|TIME_SECONDS),DoubleToString(OrderOpenPrice(),digits),DoubleToString(OrderClosePrice(),digits),DoubleToString(OrderStopLoss(),digits),DoubleToString(OrderTakeProfit(),digits),DoubleToString(OrderLots(),2),DoubleToString(RG_JournalRiskMoney(OrderSymbol(),OrderOpenPrice(),OrderStopLoss(),OrderLots()),2),DoubleToString(RG_JournalRR(OrderOpenPrice(),OrderStopLoss(),OrderTakeProfit()),2),RG_JournalSession(OrderOpenTime()),"",DoubleToString(net,2),DoubleToString(OrderSwap(),2),DoubleToString(OrderCommission(),2),duration,OrderMagicNumber(),OrderComment(),RG_JournalDay(RG_JournalBrokerToSystem(OrderOpenTime())),"","","","","","","");
-   FileClose(h); GlobalVariableSet(key,1.0);
+   FileSeek(h,0,SEEK_END);
+   int digits=(int)MarketInfo(OrderSymbol(),MODE_DIGITS);
+   double net=OrderProfit()+OrderSwap()+OrderCommission();
+   long duration=(long)(OrderCloseTime()-OrderOpenTime());
+   string volume=(metaLots!="" ? metaLots : DoubleToString(OrderLots(),2));
+   string rr=(metaRR!="" ? metaRR : RG_JournalRRText(OrderOpenPrice(),OrderStopLoss(),OrderTakeProfit()));
+   // Partial exits and SL moves are retained in the per-ticket state file.
+   FileWrite(h,"CLOSE",ticket,OrderSymbol(),RG_JournalTypeName(OrderType()),RG_JournalDate(systemClose),RG_JournalTime(systemClose),TimeToString(OrderOpenTime(),TIME_DATE|TIME_SECONDS),TimeToString(OrderCloseTime(),TIME_DATE|TIME_SECONDS),DoubleToString(OrderOpenPrice(),digits),DoubleToString(OrderClosePrice(),digits),DoubleToString(OrderStopLoss(),digits),DoubleToString(OrderTakeProfit(),digits),volume,DoubleToString(RG_JournalRiskMoney(OrderSymbol(),OrderOpenPrice(),OrderStopLoss(),OrderLots()),2),rr,RG_JournalSession(OrderOpenTime()),"",DoubleToString(net,2),DoubleToString(OrderSwap(),2),DoubleToString(OrderCommission(),2),duration,OrderMagicNumber(),OrderComment(),RG_JournalDay(RG_JournalBrokerToSystem(OrderOpenTime())),pattern,trigger,tf,conditions,status,rr,volume,metaFlags);
+   FileClose(h);
+   GlobalVariableSet(key,1.0);
+}
+
+bool RG_JournalHasCloseRecord(int ticket)
+{
+   int h=FileOpen(RG_JOURNAL_FILE,FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
+   if(h==INVALID_HANDLE) return(false);
+   while(!FileIsEnding(h))
+   {
+      string ev=FileReadString(h); if(StringLen(ev)==0 && FileIsEnding(h)) break;
+      string ts=FileReadString(h);
+      if(ev=="CLOSE" && (int)StrToInteger(ts)==ticket){ FileClose(h); return(true); }
+      for(int k=0;k<30;k++) FileReadString(h);
+   }
+   FileClose(h); return(false);
+}
+
+int g_RG_JournalLastHistoryTotal=-1;
+int g_RG_JournalLastOpenTotal=-1;
+
+void RG_JournalScanOpenOrders()
+{
+   if(!g_RG_JournalReady || !g_RG_JournalEnabled) return;
+   for(int i=OrdersTotal()-1;i>=0;i--)
+   {
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_TRADES)) continue;
+      if(!RG_JournalIsMarketType(OrderType())) continue;
+      RG_JournalAppendOpen(OrderTicket());
+   }
+   g_RG_JournalLastOpenTotal=OrdersTotal();
+}
+
+void RG_JournalScanHistory()
+{
+   if(!g_RG_JournalReady || !g_RG_JournalEnabled) return;
+   int total=OrdersHistoryTotal();
+   for(int j=total-1;j>=0;j--)
+   {
+      if(!OrderSelect(j,SELECT_BY_POS,MODE_HISTORY)) continue;
+      if(!RG_JournalIsMarketType(OrderType())) continue;
+      RG_JournalAppendClose(OrderTicket());
+   }
+   g_RG_JournalLastHistoryTotal=total;
 }
 
 void RG_JournalScan()
 {
-   if(!g_RG_JournalReady||!g_RG_JournalEnabled)return;
-   for(int i=OrdersTotal()-1;i>=0;i--){ if(!OrderSelect(i,SELECT_BY_POS,MODE_TRADES))continue; if(!RG_JournalIsMarketType(OrderType()))continue; RG_JournalAppendOpen(OrderTicket()); }
-   for(int j=OrdersHistoryTotal()-1;j>=0;j--){ if(!OrderSelect(j,SELECT_BY_POS,MODE_HISTORY))continue; if(!RG_JournalIsMarketType(OrderType()))continue; if(GlobalVariableCheck(RG_JournalGV("OPEN_"+IntegerToString(OrderTicket())))&&!GlobalVariableCheck(RG_JournalGV("CLOSE_"+IntegerToString(OrderTicket()))))RG_JournalAppendClose(OrderTicket()); }
+   if(!g_RG_JournalReady || !g_RG_JournalEnabled) return;
+   // One full synchronization is performed at initialization or when the
+   // terminal's visible History list changes. Normal ticks never call this.
+   RG_JournalScanOpenOrders();
+   RG_JournalScanHistory();
 }
 
 void RG_JournalInit()
 {
    FolderCreate("RiskGuard");
    FolderCreate(RG_JOURNAL_FOLDER);
-   g_RG_JournalSettingsVersionKey=RG_JournalGV("SETTINGS_VERSION");
    RG_JournalLoadSettings();
    RG_JournalWriteHeader();
    g_RG_JournalReady=true;
+   // Build the per-ticket fast flags once from Journal.csv. This removes the
+   // O(history x journal-file-scan) startup pattern of J05.
+   RG_JournalWarmKnownFlags();
    RG_JournalScan();
+   RG_JournalRefreshAccountStats(true);
 }
-
-bool RG_JournalHasPendingSync(){ return(g_RG_JournalPendingSync); }
-void RG_JournalClearPendingSync(){ g_RG_JournalPendingSync=false; }
 
 void RG_JournalUpdate()
 {
-   if(!g_RG_JournalReady) return;
-   if(g_RG_JournalEnabled) RG_JournalScan();
+   if(!g_RG_JournalReady || !g_RG_JournalEnabled) return;
+
+   // Open trades are checked once per timer tick so SL moves and partial
+   // closes are captured, but no Account History scan is performed unless
+   // the terminal reports that its history size changed.
+   RG_JournalScanOpenOrders();
+
+   int historyTotal=OrdersHistoryTotal();
+   if(historyTotal!=g_RG_JournalLastHistoryTotal)
+      RG_JournalScanHistory();
+
+   // Account History is the source of truth for Journal statistics.
+   // Recalculate only when the visible history size changes.
+   RG_JournalRefreshAccountStats(false);
+}
+
+
+// Logical-trade aggregation for MT4 brokers that represent partial closes
+// as multiple history tickets. Fragments are grouped by immutable entry facts.
+bool RG_JournalSameLogicalTradeSelected(int ticketA,int ticketB)
+{
+   if(ticketA<=0 || ticketB<=0) return(false);
+   if(ticketA==ticketB) return(true);
+   if(!OrderSelect(ticketA,SELECT_BY_TICKET,MODE_HISTORY)) return(false);
+   string symA=OrderSymbol();
+   int typeA=OrderType(), magicA=OrderMagicNumber();
+   datetime openA=OrderOpenTime();
+   double priceA=OrderOpenPrice();
+   double tolA=MarketInfo(symA,MODE_POINT)*0.5;
+
+   // Separate preview snapshots are attached to separate entry tickets.
+   // Never merge two tickets that both have their own entry metadata files.
+   string metaFileA=RG_JOURNAL_FOLDER+"\\Meta_"+IntegerToString(ticketA)+".csv";
+   string metaFileB=RG_JOURNAL_FOLDER+"\\Meta_"+IntegerToString(ticketB)+".csv";
+   if(FileIsExist(metaFileA) && FileIsExist(metaFileB)) return(false);
+
+   string pa="",ta="",tfa="",ca="",sa="",la="",ra="",fa="";
+   bool hasMetaA=RG_JournalReadMeta(ticketA,pa,ta,tfa,ca,sa,la,ra,fa);
+   if(!OrderSelect(ticketB,SELECT_BY_TICKET,MODE_HISTORY)) return(false);
+   if(OrderSymbol()!=symA || OrderType()!=typeA || OrderMagicNumber()!=magicA) return(false);
+   if(OrderOpenTime()!=openA || MathAbs(OrderOpenPrice()-priceA)>tolA) return(false);
+
+   string pb="",tb="",tfb="",cb="",sb="",lb="",rb="",fb="";
+   bool hasMetaB=RG_JournalReadMeta(ticketB,pb,tb,tfb,cb,sb,lb,rb,fb);
+   // Distinct user-selected entry metadata proves these are separate entries,
+   // even if the broker assigned the same open second and price.
+   bool selectedA=((pa!="" && pa!="NONE") || (ta!="" && ta!="NONE"));
+   bool selectedB=((pb!="" && pb!="NONE") || (tb!="" && tb!="NONE"));
+   if(hasMetaA && hasMetaB && selectedA && selectedB &&
+      (pa!=pb || ta!=tb || tfa!=tfb))
+      return(false);
+
+   return(true);
+}
+
+bool RG_JournalIsFirstTradeFragment(int historyIndex)
+{
+   if(!OrderSelect(historyIndex,SELECT_BY_POS,MODE_HISTORY)) return(false);
+   int ticket=OrderTicket();
+   datetime closeTime=OrderCloseTime();
+   int total=OrdersHistoryTotal();
+   bool isFirst=true;
+   for(int j=0;j<total;j++)
+   {
+      if(j==historyIndex || !OrderSelect(j,SELECT_BY_POS,MODE_HISTORY)) continue;
+      int other=OrderTicket();
+      if(!RG_JournalSameLogicalTradeSelected(ticket,other)) continue;
+      if(!OrderSelect(other,SELECT_BY_TICKET,MODE_HISTORY)) continue;
+      // Use the earliest closing fragment as the canonical logical-trade
+      // ticket. Other fragments must not replace the original entry metadata.
+      if(OrderCloseTime()>closeTime) isFirst=false;
+      if(OrderCloseTime()==closeTime && other<ticket) isFirst=false;
+      if(!isFirst) break;
+   }
+   // IMPORTANT: helper calls change MT4's selected order. Restore the candidate
+   // so callers never read the last scanned history ticket by accident.
+   OrderSelect(ticket,SELECT_BY_TICKET,MODE_HISTORY);
+   return(isFirst);
+}
+
+bool RG_JournalAggregateTrade(int ticket,double &closedLots,double &net,datetime &lastClose,int &fragments)
+{
+   closedLots=0.0; net=0.0; lastClose=0; fragments=0;
+   if(!OrderSelect(ticket,SELECT_BY_TICKET,MODE_HISTORY)) return(false);
+   int total=OrdersHistoryTotal();
+   for(int j=0;j<total;j++)
+   {
+      if(!OrderSelect(j,SELECT_BY_POS,MODE_HISTORY)) continue;
+      int other=OrderTicket();
+      if(!RG_JournalSameLogicalTradeSelected(ticket,other)) continue;
+      if(!OrderSelect(other,SELECT_BY_TICKET,MODE_HISTORY)) continue;
+      closedLots+=OrderLots();
+      net+=OrderProfit()+OrderSwap()+OrderCommission();
+      if(OrderCloseTime()>lastClose) lastClose=OrderCloseTime();
+      fragments++;
+   }
+   return(fragments>0);
+}
+
+// Resolve metadata across every history fragment of one logical trade.
+// MT4 brokers may assign a different ticket to a partial-close fragment,
+// while the Pattern/Trigger and original volume remain attached to the entry ticket.
+bool RG_JournalReadLogicalTradeMeta(int ticket,string &pattern,string &trigger,string &tf,string &conditions,string &status,string &lots,string &rr,string &flags)
+{
+   pattern=""; trigger=""; tf=""; conditions=""; status=""; lots=""; rr=""; flags="";
+   if(ticket<=0 || !OrderSelect(ticket,SELECT_BY_TICKET,MODE_HISTORY)) return(false);
+   int total=OrdersHistoryTotal();
+   bool found=false;
+   double bestLots=0.0;
+   for(int j=0;j<total;j++)
+   {
+      if(!OrderSelect(j,SELECT_BY_POS,MODE_HISTORY)) continue;
+      int candidate=OrderTicket();
+      if(!RG_JournalSameLogicalTradeSelected(ticket,candidate)) continue;
+      string cp="",ct="",cf="",cc="",cs="",cl="",cr="",cflags="";
+      bool has=RG_JournalReadMeta(candidate,cp,ct,cf,cc,cs,cl,cr,cflags);
+      if(!has) continue;
+      double candidateLots=StrToDouble(cl);
+      bool hasSelections=((cp!="" && cp!="NONE") || (ct!="" && ct!="NONE"));
+      bool currentSelections=((pattern!="" && pattern!="NONE") || (trigger!="" && trigger!="NONE"));
+      if(!found || (hasSelections && !currentSelections) || (candidateLots>bestLots && hasSelections))
+      {
+         pattern=cp; trigger=ct; tf=cf; conditions=cc; status=cs; lots=cl; rr=cr; flags=cflags;
+         bestLots=candidateLots;
+      }
+      else
+      {
+         if((pattern=="" || pattern=="NONE") && cp!="" && cp!="NONE") pattern=cp;
+         if((trigger=="" || trigger=="NONE") && ct!="" && ct!="NONE") trigger=ct;
+         if((tf=="" || tf=="NONE") && cf!="" && cf!="NONE") tf=cf;
+         if((conditions=="" || conditions=="NONE") && cc!="" && cc!="NONE") conditions=cc;
+         if(lots=="" && cl!="") lots=cl;
+         if(rr=="" && cr!="") rr=cr;
+         if(flags=="" && cflags!="") flags=cflags;
+      }
+      found=true;
+   }
+   return(found);
+}
+
+// Read state from all fragments belonging to the same logical trade.
+// Partial-close fragments may have their own tickets/state files; the export
+// must show SL-move and partial-exit flags accumulated anywhere in the group.
+bool RG_JournalReadLogicalTradeState(int ticket,string &originalLots,string &lastLots,string &originalSL,string &lastSL,string &partialText,string &slMoveText)
+{
+   RG_JournalStateDefaults(originalLots,lastLots,originalSL,lastSL,partialText,slMoveText);
+   if(ticket<=0 || !OrderSelect(ticket,SELECT_BY_TICKET,MODE_HISTORY)) return(false);
+   string symbol=OrderSymbol(); int type=OrderType(); int magic=OrderMagicNumber();
+   datetime opened=OrderOpenTime(); double openPrice=OrderOpenPrice();
+   bool found=false;
+   int total=OrdersHistoryTotal();
+   for(int i=0;i<total;i++)
+   {
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+      int candidate=OrderTicket();
+      if(!RG_JournalSameLogicalTradeSelected(ticket,candidate)) continue;
+      if(!OrderSelect(candidate,SELECT_BY_TICKET,MODE_HISTORY)) continue;
+      string o,l,os,ls,pt,sm;
+      if(!RG_JournalReadState(candidate,o,l,os,ls,pt,sm)) continue;
+      if(!found || (originalLots=="" && o!=""))
+      { originalLots=o; lastLots=l; originalSL=os; lastSL=ls; found=true; }
+      if(pt!="") { if(partialText!="") partialText+=" | "; partialText+=pt; }
+      if(sm!="") { if(slMoveText!="") slMoveText+=" | "; slMoveText+=sm; }
+   }
+   return(found || partialText!="" || slMoveText!="");
+}
+
+//====================================================
+// JOURNAL CORE DATA VIEW
+//====================================================
+struct RG_JournalRecord
+{
+   int ticket;
+   string date;
+   string time;
+   string symbol;
+   string type;
+   string tf;
+   string pattern;
+   string trigger;
+   string conditions;
+   string session;
+   string rr;
+   double lots;
+   double net;
+   string partialExit;
+   string slMove;
+   string description;
+};
+
+int RG_JournalLoadClosedRecords(RG_JournalRecord &rows[],datetime fromDate,datetime toDate)
+{
+   ArrayResize(rows,0);
+   int total=OrdersHistoryTotal();
+   for(int i=total-1;i>=0;i--)
+   {
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+      int typ=OrderType();
+      if(!RG_JournalIsMarketType(typ) || !RG_JournalIsFirstTradeFragment(i)) continue;
+      int ticket=OrderTicket();
+      double aggregateLots=0.0,aggregateNet=0.0;
+      datetime ct=0; int aggregateFragments=0;
+      if(!RG_JournalAggregateTrade(ticket,aggregateLots,aggregateNet,ct,aggregateFragments)) continue;
+      if(!OrderSelect(ticket,SELECT_BY_TICKET,MODE_HISTORY)) continue;
+      if(ct<=0 || ct<fromDate || ct>=toDate+86400) continue;
+
+      string pattern="",trigger="",tf="",conditions="",status="",metaLots="",metaRR="",flags="";
+      RG_JournalReadLogicalTradeMeta(ticket,pattern,trigger,tf,conditions,status,metaLots,metaRR,flags);
+      int n=ArraySize(rows); ArrayResize(rows,n+1);
+      rows[n].ticket=ticket;
+      rows[n].date=TimeToString(ct,TIME_DATE);
+      rows[n].time=TimeToString(ct,TIME_SECONDS);
+      rows[n].symbol=OrderSymbol();
+      rows[n].type=RG_JournalTypeName(typ);
+      rows[n].tf=(tf!="" ? tf : "NONE");
+      rows[n].pattern=(pattern!="" ? pattern : "NONE");
+      rows[n].trigger=(trigger!="" ? trigger : "NONE");
+      rows[n].conditions=RG_JournalConditionMark(conditions);
+      rows[n].session=RG_JournalSession(OrderOpenTime());
+      rows[n].rr=(metaRR!="" ? metaRR : RG_JournalRRText(OrderOpenPrice(),OrderStopLoss(),OrderTakeProfit()));
+      rows[n].lots=(metaLots!="" ? StrToDouble(metaLots) : aggregateLots);
+      rows[n].net=aggregateNet;
+      string so,sl0,sol,sl1,sp,ss;
+      RG_JournalReadLogicalTradeState(ticket,so,sl0,sol,sl1,sp,ss);
+      double lotStep=MarketInfo(OrderSymbol(),MODE_LOTSTEP);
+      if(lotStep<=0.0) lotStep=0.01;
+      rows[n].partialExit=((sp!="" || aggregateFragments>1) ? RG_JournalCheckMark() : "");
+      rows[n].slMove=(ss!="" ? RG_JournalCheckMark() : "");
+      rows[n].description=RG_JournalGetDescription(ticket);
+   }
+   return(ArraySize(rows));
+}
+
+//====================================================
+// ACCOUNT HISTORY STATISTICS / STANDARD KELLY
+//
+// Account History is the source of truth for closed-trade statistics.
+// P is returned as a fraction in [0,1].
+// A is Average Win / Average Loss.
+// f is the standard Kelly fraction:
+//     f = (((A + 1) * P) - 1) / A
+//====================================================
+int g_RG_JournalCachedHistoryTotal=-1;
+int g_RG_JournalCachedTrades=0;
+int g_RG_JournalCachedWins=0;
+int g_RG_JournalCachedLosses=0;
+double g_RG_JournalCachedNet=0.0;
+double g_RG_JournalCachedGrossWin=0.0;
+double g_RG_JournalCachedGrossLoss=0.0;
+double g_RG_JournalCachedP=0.0;
+double g_RG_JournalCachedA=0.0;
+double g_RG_JournalCachedF=0.0;
+
+// Cached history snapshot used by the optimized account-statistics pass.
+// All terminal order selections and metadata-file reads happen once per history
+// record; grouping then compares in-memory values instead of repeatedly calling
+// OrderSelect and opening metadata files inside nested history scans.
+struct RG_JournalStatsItem
+{
+   int ticket;
+   int type;
+   string symbol;
+   int magic;
+   datetime openTime;
+   double openPrice;
+   datetime closeTime;
+   double lots;
+   double net;
+   bool metaFile;
+   bool hasMeta;
+   string pattern;
+   string trigger;
+   string tf;
+};
+
+void RG_JournalRefreshAccountStats(bool force=false)
+{
+   if(!g_RG_JournalReady && !force) return;
+
+   int total=OrdersHistoryTotal();
+   if(!force && total==g_RG_JournalCachedHistoryTotal)
+      return;
+
+   RG_JournalStatsItem items[];
+   ArrayResize(items,total);
+   int used=0;
+   for(int i=total-1;i>=0;i--)
+   {
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+      int typ=OrderType();
+      if(!RG_JournalIsMarketType(typ)) continue;
+
+      int ticket=OrderTicket();
+      items[used].ticket=ticket;
+      items[used].type=typ;
+      items[used].symbol=OrderSymbol();
+      items[used].magic=OrderMagicNumber();
+      items[used].openTime=OrderOpenTime();
+      items[used].openPrice=OrderOpenPrice();
+      items[used].closeTime=OrderCloseTime();
+      items[used].lots=OrderLots();
+      items[used].net=OrderProfit()+OrderSwap()+OrderCommission();
+      string metaPath=RG_JOURNAL_FOLDER+"\\Meta_"+IntegerToString(ticket)+".csv";
+      items[used].metaFile=FileIsExist(metaPath);
+      items[used].pattern=""; items[used].trigger=""; items[used].tf="";
+      string conditions="",status="",lots="",rr="",flags="";
+      items[used].hasMeta=RG_JournalReadMeta(ticket,items[used].pattern,items[used].trigger,
+                                             items[used].tf,conditions,status,lots,rr,flags);
+      used++;
+   }
+   ArrayResize(items,used);
+
+   int trades=0,wins=0,losses=0;
+   double net=0.0,grossWin=0.0,grossLoss=0.0;
+   double pointCache[];
+   string symbolCache[];
+   int symbolCount=0;
+
+   // Match the established logical-trade rules in memory. Metadata-file checks,
+   // metadata reads, and order selection are deliberately outside these loops.
+   for(int a=0;a<used;a++)
+   {
+      bool isFirst=true;
+      double point=0.0;
+      int symbolSlot=-1;
+      for(int sc=0;sc<symbolCount;sc++)
+         if(symbolCache[sc]==items[a].symbol) { symbolSlot=sc; break; }
+      if(symbolSlot<0)
+      {
+         symbolSlot=symbolCount++;
+         ArrayResize(symbolCache,symbolCount);
+         ArrayResize(pointCache,symbolCount);
+         symbolCache[symbolSlot]=items[a].symbol;
+         pointCache[symbolSlot]=MarketInfo(items[a].symbol,MODE_POINT)*0.5;
+      }
+      point=pointCache[symbolSlot];
+
+      bool selectedA=((items[a].pattern!="" && items[a].pattern!="NONE") ||
+                      (items[a].trigger!="" && items[a].trigger!="NONE"));
+      for(int b=0;b<used;b++)
+      {
+         if(a==b) continue;
+         if(items[a].metaFile && items[b].metaFile) continue;
+         if(items[b].symbol!=items[a].symbol || items[b].type!=items[a].type ||
+            items[b].magic!=items[a].magic || items[b].openTime!=items[a].openTime ||
+            MathAbs(items[b].openPrice-items[a].openPrice)>point) continue;
+
+         bool selectedB=((items[b].pattern!="" && items[b].pattern!="NONE") ||
+                         (items[b].trigger!="" && items[b].trigger!="NONE"));
+         if(items[a].hasMeta && items[b].hasMeta && selectedA && selectedB &&
+            (items[a].pattern!=items[b].pattern || items[a].trigger!=items[b].trigger ||
+             items[a].tf!=items[b].tf)) continue;
+
+         if(items[b].closeTime<items[a].closeTime ||
+            (items[b].closeTime==items[a].closeTime && items[b].ticket<items[a].ticket))
+         { isFirst=false; break; }
+      }
+      if(!isFirst) continue;
+
+      double tradePL=0.0;
+      int groupedCount=0;
+      for(int c=0;c<used;c++)
+      {
+         if(c!=a && items[a].metaFile && items[c].metaFile) continue;
+         if(items[c].symbol!=items[a].symbol || items[c].type!=items[a].type ||
+            items[c].magic!=items[a].magic || items[c].openTime!=items[a].openTime ||
+            MathAbs(items[c].openPrice-items[a].openPrice)>point) continue;
+         bool selectedC=((items[c].pattern!="" && items[c].pattern!="NONE") ||
+                         (items[c].trigger!="" && items[c].trigger!="NONE"));
+         if(items[a].hasMeta && items[c].hasMeta && selectedA && selectedC &&
+            (items[a].pattern!=items[c].pattern || items[a].trigger!=items[c].trigger ||
+             items[a].tf!=items[c].tf)) continue;
+         tradePL+=items[c].net;
+         groupedCount++;
+      }
+      if(groupedCount<=0) continue;
+      trades++;
+      net+=tradePL;
+      if(tradePL>0.0) { wins++; grossWin+=tradePL; }
+      else if(tradePL<0.0) { losses++; grossLoss+=MathAbs(tradePL); }
+   }
+
+   double P=(trades>0 ? (double)wins/(double)trades : 0.0);
+   double avgWin=(wins>0 ? grossWin/(double)wins : 0.0);
+   double avgLoss=(losses>0 ? grossLoss/(double)losses : 0.0);
+   double A=(avgLoss>0.0 ? avgWin/avgLoss : 0.0);
+   double f=(A>0.0 ? ((((A+1.0)*P)-1.0)/A) : 0.0);
+   if(f<0.0) f=0.0;
+
+   g_RG_JournalCachedHistoryTotal=total;
+   g_RG_JournalCachedTrades=trades;
+   g_RG_JournalCachedWins=wins;
+   g_RG_JournalCachedLosses=losses;
+   g_RG_JournalCachedNet=net;
+   g_RG_JournalCachedGrossWin=grossWin;
+   g_RG_JournalCachedGrossLoss=grossLoss;
+   g_RG_JournalCachedP=P;
+   g_RG_JournalCachedA=A;
+   g_RG_JournalCachedF=f;
+}
+
+
+void RG_JournalGetAccountStats(int &trades,int &wins,int &losses,double &net,double &P,double &A,double &f)
+{
+   RG_JournalRefreshAccountStats(false);
+   trades=g_RG_JournalCachedTrades;
+   wins=g_RG_JournalCachedWins;
+   losses=g_RG_JournalCachedLosses;
+   net=g_RG_JournalCachedNet;
+   P=g_RG_JournalCachedP;
+   A=g_RG_JournalCachedA;
+   f=g_RG_JournalCachedF;
+}
+
+datetime RG_JournalGetEarliestHistoryDate()
+{
+   datetime earliest=0;
+   int total=OrdersHistoryTotal();
+
+   for(int i=total-1;i>=0;i--)
+   {
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+      if(!RG_JournalIsMarketType(OrderType())) continue;
+
+      datetime ct=OrderCloseTime();
+      if(ct<=0) continue;
+
+      if(earliest==0 || ct<earliest)
+         earliest=ct;
+   }
+
+   return(earliest);
+}
+
+void RG_JournalCalculatePAF(datetime fromDate,datetime toDate,double &P,double &A,double &f,int &trades,int &wins)
+{
+   // Standard Kelly over the requested Account History period.
+   // P = Profit Trades / Total Trades (fraction 0..1).
+   // A = Average Profit Trade / Average Loss Trade.
+   // f = (((A+1) * P) - 1) / A.
+   trades=0; wins=0; P=0.0; A=0.0; f=0.0;
+
+   int losses=0;
+   double grossWin=0.0,grossLoss=0.0;
+
+   int total=OrdersHistoryTotal();
+   for(int i=total-1;i>=0;i--)
+   {
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+
+      int typ=OrderType();
+      if(!RG_JournalIsMarketType(typ) || !RG_JournalIsFirstTradeFragment(i)) continue;
+      double groupedLots=0.0,tradePL=0.0; datetime ct=0; int groupedCount=0;
+      if(!RG_JournalAggregateTrade(OrderTicket(),groupedLots,tradePL,ct,groupedCount)) continue;
+      if(ct<=0 || ct<fromDate || ct>=toDate+86400) continue;
+
+      trades++;
+
+      if(tradePL>0.0)
+      {
+         wins++;
+         grossWin+=tradePL;
+      }
+      else if(tradePL<0.0)
+      {
+         losses++;
+         grossLoss+=MathAbs(tradePL);
+      }
+   }
+
+   if(trades>0)
+      P=(double)wins/(double)trades;
+
+   double avgWin=(wins>0 ? grossWin/(double)wins : 0.0);
+   double avgLoss=(losses>0 ? grossLoss/(double)losses : 0.0);
+
+   if(avgLoss>0.0)
+      A=avgWin/avgLoss;
+
+   if(A>0.0)
+      f=((((A+1.0)*P)-1.0)/A);
+   if(f<0.0) f=0.0;
 }
 
 
@@ -536,33 +1324,36 @@ bool RG_JournalDateInRange(string dateText,datetime fromDate,datetime toDate)
 
 bool RG_JournalCalculateReport(datetime fromDate,datetime toDate,int &trades,int &wins,int &losses,double &grossProfit,double &grossLoss,double &net,double &p,double &a)
 {
+   // Report statistics are derived from MT4 Account History, not Journal.csv.
+   // Journal.csv may be incomplete when a trade was not recorded by the EA.
    trades=0; wins=0; losses=0; grossProfit=0.0; grossLoss=0.0; net=0.0; p=0.0; a=0.0;
-   RG_JournalReportMeta meta[]; RG_JournalReadOpenMeta(meta);
-   int h=FileOpen(RG_JOURNAL_FILE,FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,';');
-   if(h==INVALID_HANDLE) return(false);
-   while(!FileIsEnding(h))
+
+   int total=OrdersHistoryTotal();
+   for(int i=total-1;i>=0;i--)
    {
-      string ev=FileReadString(h); if(StringLen(ev)==0 && FileIsEnding(h)) break;
-      string ticketS=FileReadString(h); string symbol=FileReadString(h); string type=FileReadString(h);
-      string sd=FileReadString(h); string st=FileReadString(h);
-      string bo=FileReadString(h); string bc=FileReadString(h);
-      string entry=FileReadString(h); string exitp=FileReadString(h);
-      string sl=FileReadString(h); string tp=FileReadString(h);
-      string lots=FileReadString(h); string risk=FileReadString(h); string rr=FileReadString(h);
-      string session=FileReadString(h); string news=FileReadString(h);
-      string profit=FileReadString(h); string swap=FileReadString(h); string comm=FileReadString(h);
-      string dur=FileReadString(h); string magic=FileReadString(h); string comment=FileReadString(h);
-      string day=FileReadString(h); string pattern=FileReadString(h); string trigger=FileReadString(h);
-      string reasonTF=FileReadString(h); string conditions=FileReadString(h); string status=FileReadString(h);
-      string checklistRR=FileReadString(h); string checklistVol=FileReadString(h); string flags=FileReadString(h);
-      if(ev!="CLOSE") continue;
-      if(!RG_JournalDateInRange(sd,fromDate,toDate)) continue;
-      double pl=StrToDouble(profit); trades++; net+=pl;
-      if(pl>0.0){wins++;grossProfit+=pl;} else if(pl<0.0){losses++;grossLoss+=MathAbs(pl);}
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+      if(!RG_JournalIsMarketType(OrderType()) || !RG_JournalIsFirstTradeFragment(i)) continue;
+      double groupedLots=0.0,pl=0.0; datetime closeTime=0; int groupedCount=0;
+      if(!RG_JournalAggregateTrade(OrderTicket(),groupedLots,pl,closeTime,groupedCount)) continue;
+      if(closeTime<=0 || closeTime<fromDate || closeTime>=toDate+86400) continue;
+      trades++;
+      net+=pl;
+      if(pl>0.0)
+      {
+         wins++;
+         grossProfit+=pl;
+      }
+      else if(pl<0.0)
+      {
+         losses++;
+         grossLoss+=MathAbs(pl);
+      }
    }
-   FileClose(h);
+
    if(trades>0) p=100.0*(double)wins/(double)trades;
-   if(grossLoss>0.0) a=grossProfit/grossLoss;
+   double avgWin=(wins>0 ? grossProfit/(double)wins : 0.0);
+   double avgLoss=(losses>0 ? grossLoss/(double)losses : 0.0);
+   if(avgLoss>0.0) a=avgWin/avgLoss;
    return(true);
 }
 
@@ -571,142 +1362,124 @@ string RG_JournalReportStamp(datetime fromDate,datetime toDate)
    return(TimeToString(fromDate,TIME_DATE)+" -> "+TimeToString(toDate,TIME_DATE));
 }
 
+string RG_JournalHtmlEscape(string value)
+{
+   string s=value;
+   StringReplace(s,"&","&amp;");
+   StringReplace(s,"<","&lt;");
+   StringReplace(s,">","&gt;");
+   StringReplace(s,"\"","&quot;");
+   StringReplace(s,"\r\n","<br>");
+   StringReplace(s,"\n","<br>");
+   StringReplace(s,"\r","<br>");
+   return(s);
+}
+
+void RG_JournalHtmlCell(int handle,string value)
+{
+   FileWriteString(handle,"<td>"+RG_JournalHtmlEscape(value)+"</td>\r\n");
+}
+
 bool RG_JournalExportRaw(datetime fromDate,datetime toDate,string &outFile)
 {
-   g_RG_JournalLastExportError=0;
-   outFile="";
-
-   // MT4 file sandbox: this is MQL4\\Files\\DOCS.
-   string folder="DOCS";
-   ResetLastError();
-   FolderCreate(folder);
-
-   // Use a fixed, simple filename for the first stable export implementation.
-   // Excel opens this CSV directly. A later export intentionally overwrites it.
-   string target=folder+"\\RiskGuard_Journal.csv";
-
-   ResetLastError();
-   int out=FileOpen(
-      target,
-      FILE_CSV|FILE_WRITE|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE,
-      ';'
-   );
-   int openErr=GetLastError();
-
-   // If DOCS cannot be opened, try the root MQL4\\Files folder so that the
-   // actual MT4 file-system error is distinguishable from an Excel problem.
-   if(out==INVALID_HANDLE)
-   {
-      g_RG_JournalLastExportError=openErr;
-      ResetLastError();
-      string fallback="RiskGuard_Journal.csv";
-      out=FileOpen(
-         fallback,
-         FILE_CSV|FILE_WRITE|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE,
-         ';'
-      );
-      int fallbackErr=GetLastError();
-      if(out==INVALID_HANDLE)
-      {
-         g_RG_JournalLastExportError=fallbackErr;
-         return(false);
-      }
-      target=fallback;
-   }
-
+   g_RG_JournalLastExportError=0; outFile="";
+   string folder="RiskGuard\\DOCS";
+   FolderCreate("RiskGuard"); FolderCreate(folder);
+   string target=folder+"\\RiskGuard_Journal.xls";
+   int out=FileOpen(target,FILE_TXT|FILE_WRITE|FILE_UNICODE|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(out==INVALID_HANDLE){ g_RG_JournalLastExportError=GetLastError(); return(false); }
    outFile=target;
 
-   // Header is always written, even when there are no Journal trades yet.
-   FileWrite(
-      out,
-      "Ticket","Date","Symbol","Time","Type","Timeframe",
-      "Pattern","Trigger","Conditions","R/R","Volume",
-      "TP","SL","Result","Description"
-   );
+   // FIX13: real Excel-compatible HTML worksheet, RTL, borders, and account-history rows.
+   FileWriteString(out,"<html xmlns:x=\"urn:schemas-microsoft-com:office:excel\"><head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-16\"><meta name=\"ProgId\" content=\"Excel.Sheet\">");
+   FileWriteString(out,"<style>html,body{direction:rtl;}table{border-collapse:collapse;width:100%;direction:rtl;}th,td{border:1px solid #777;padding:5px;vertical-align:middle;text-align:center;white-space:pre-wrap;mso-number-format:'\\@';}th{font-weight:bold;background:#D9EAF7;} .summary td{font-weight:bold;background:#F2F2F2;}</style></head><body dir=\"rtl\">");
+   FileWriteString(out,"<xml><x:WorksheetOptions><x:DisplayRightToLeft/></x:WorksheetOptions></xml>");
 
-   RG_JournalReportMeta meta[];
-   RG_JournalReadOpenMeta(meta);
-
-   ResetLastError();
-   int h=FileOpen(
-      RG_JOURNAL_FILE,
-      FILE_CSV|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE,
-      ';'
-   );
-
-   if(h!=INVALID_HANDLE)
+   int total=0,wins=0,losses=0; double sumWin=0.0,sumLoss=0.0;
+   for(int i=OrdersHistoryTotal()-1;i>=0;i--)
    {
-      while(!FileIsEnding(h))
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+      int typ=OrderType(); if(!RG_JournalIsMarketType(typ) || !RG_JournalIsFirstTradeFragment(i)) continue;
+      double groupedLots=0.0,net=0.0; datetime ct=0; int groupedCount=0;
+      if(!RG_JournalAggregateTrade(OrderTicket(),groupedLots,net,ct,groupedCount)) continue;
+      if(ct<=0 || ct<fromDate || ct>=toDate+86400) continue;
+      total++;
+      if(net>0.0){wins++;sumWin+=net;}
+      else if(net<0.0){losses++;sumLoss+=MathAbs(net);}
+   }
+   double P=(total>0 ? (double)wins/(double)total : 0.0);
+   double avgWin=(wins>0 ? sumWin/(double)wins : 0.0);
+   double avgLoss=(losses>0 ? sumLoss/(double)losses : 0.0);
+   double A=(avgLoss>0.0 ? avgWin/avgLoss : 0.0);
+   double f=(A>0.0 ? ((((A+1.0)*P)-1.0)/A) : 0.0);
+   if(f<0.0) f=0.0;
+
+   FileWriteString(out,"<table class=\"summary\"><tr><th>Parameter</th><th>Value</th><th>Formula</th></tr>");
+   FileWriteString(out,"<tr><td>A</td><td>"+DoubleToString(A,4)+"</td><td colspan=\"3\">Average Win / Average Loss</td></tr>");
+   FileWriteString(out,"<tr><td>P</td><td>"+DoubleToString(P*100.0,2)+"%</td><td colspan=\"3\">Winning Trades / Total Trades</td></tr>");
+   FileWriteString(out,"<tr><td>f</td><td>"+DoubleToString(f*100.0,2)+"%</td><td colspan=\"3\">(((A+1) &times; P) &minus; 1) / A</td></tr></table><br>");
+
+   string headers[17]={"Trade #","Date","Symbol","Time","Trade Type","Trade Timeframe","Pattern","Conditions","Trigger","Risk/Reward","Volume","Partial Exit","Take Profit","Stop Loss","Stop Loss Move","Result","Description"};
+   FileWriteString(out,"<table><tr>");
+   for(int hi=0;hi<17;hi++) FileWriteString(out,"<th>"+RG_JournalHtmlEscape(headers[hi])+"</th>");
+   FileWriteString(out,"</tr>");
+
+   for(int i=OrdersHistoryTotal()-1;i>=0;i--)
+   {
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+      int typ=OrderType(); if(!RG_JournalIsMarketType(typ) || !RG_JournalIsFirstTradeFragment(i)) continue;
+      int ticket=OrderTicket();
+      double aggregateLots=0.0,aggregateNet=0.0; datetime ct=0; int aggregateFragments=0;
+      if(!RG_JournalAggregateTrade(ticket,aggregateLots,aggregateNet,ct,aggregateFragments)) continue;
+      if(!OrderSelect(ticket,SELECT_BY_TICKET,MODE_HISTORY)) continue;
+      if(ct<=0 || ct<fromDate || ct>=toDate+86400) continue;
+      // Snapshot the selected logical trade before metadata/state helpers run;
+      // those helpers scan history and change MT4's globally selected order.
+      string tradeSymbol=OrderSymbol();
+      int tradeType=OrderType();
+      datetime tradeOpenTime=OrderOpenTime();
+      double tradeOpenPrice=OrderOpenPrice();
+      double tradeSL=OrderStopLoss();
+      double tradeTP=OrderTakeProfit();
+      int tradeDigits=(int)MarketInfo(tradeSymbol,MODE_DIGITS);
+
+      string pattern="",trigger="",tf="",conditions="",status="",metaLots="",metaRR="",flags="";
+      RG_JournalReadLogicalTradeMeta(ticket,pattern,trigger,tf,conditions,status,metaLots,metaRR,flags);
+      string volume=(metaLots!="" ? metaLots : DoubleToString(aggregateLots,2));
+      string rr=(metaRR!="" ? metaRR : RG_JournalRRText(tradeOpenPrice,tradeSL,tradeTP));
+      string date=TimeToString(ct,TIME_DATE);
+      string tm=TimeToString(ct,TIME_SECONDS);
+      string result=DoubleToString(aggregateNet,2);
+      string row[17];
+      row[0]=IntegerToString(ticket); row[1]=date; row[2]=tradeSymbol; row[3]=tm; row[4]=RG_JournalTypeName(tradeType);
+      row[5]=(tf!="" ? tf : "NONE"); row[6]=(pattern!="" ? pattern : "NONE"); row[7]=RG_JournalConditionMark(conditions); row[8]=(trigger!="" ? trigger : "NONE"); row[9]=rr; row[10]=volume; row[11]="";
+      row[12]=DoubleToString(tradeTP,tradeDigits); row[13]=DoubleToString(tradeSL,tradeDigits);
+      string stateOriginalLots,stateLastLots,stateOriginalSL,stateLastSL,statePartial,stateSLMoves;
+      RG_JournalReadLogicalTradeState(ticket,stateOriginalLots,stateLastLots,stateOriginalSL,stateLastSL,statePartial,stateSLMoves);
+      double entryLotsForPartial=(metaLots!="" ? StrToDouble(metaLots) : OrderLots());
+      double lotStepForPartial=MarketInfo(OrderSymbol(),MODE_LOTSTEP);
+      if(lotStepForPartial<=0.0) lotStepForPartial=0.01;
+      bool partialDetected=(statePartial!="" || aggregateFragments>1 || entryLotsForPartial>aggregateLots+0.5*lotStepForPartial);
+      row[11]=(partialDetected ? RG_JournalCheckMark() : "");
+      row[14]=(stateSLMoves!="" ? RG_JournalCheckMark() : "");
+      row[15]=result; row[16]=RG_JournalGetDescription(ticket);
+      FileWriteString(out,"<tr>");
+      for(int ci=0;ci<17;ci++)
       {
-         string ev=FileReadString(h);
-         if(StringLen(ev)==0 && FileIsEnding(h)) break;
-
-         string ticketS=FileReadString(h);
-         string symbol=FileReadString(h);
-         string type=FileReadString(h);
-         string sd=FileReadString(h);
-         string st=FileReadString(h);
-         string bo=FileReadString(h);
-         string bc=FileReadString(h);
-         string entry=FileReadString(h);
-         string exitp=FileReadString(h);
-         string sl=FileReadString(h);
-         string tp=FileReadString(h);
-         string lots=FileReadString(h);
-         string risk=FileReadString(h);
-         string rr=FileReadString(h);
-         string session=FileReadString(h);
-         string news=FileReadString(h);
-         string profit=FileReadString(h);
-         string swap=FileReadString(h);
-         string comm=FileReadString(h);
-         string dur=FileReadString(h);
-         string magic=FileReadString(h);
-         string comment=FileReadString(h);
-         string day=FileReadString(h);
-         string pattern=FileReadString(h);
-         string trigger=FileReadString(h);
-         string reasonTF=FileReadString(h);
-         string conditions=FileReadString(h);
-         string status=FileReadString(h);
-         string checklistRR=FileReadString(h);
-         string checklistVol=FileReadString(h);
-         string flags=FileReadString(h);
-
-         if(ev!="CLOSE") continue;
-         if(!RG_JournalDateInRange(sd,fromDate,toDate)) continue;
-
-         int ticket=(int)StrToInteger(ticketS);
-         int mi=RG_JournalFindReportMeta(meta,ticket);
-
-         string pat=(mi>=0 ? meta[mi].pattern : pattern);
-         string tr =(mi>=0 ? meta[mi].trigger  : trigger);
-         string tf =(mi>=0 ? meta[mi].tf       : reasonTF);
-         string cond=(mi>=0 ? meta[mi].conditions : conditions);
-         string vol=(mi>=0 ? DoubleToString(meta[mi].lots,2) : lots);
-         string description=RG_JournalGetDescription(ticket);
-
-         FileWrite(
-            out,
-            ticketS,sd,symbol,st,type,tf,pat,tr,cond,
-            (checklistRR!="" ? checklistRR : rr),
-            vol,tp,sl,profit,description
-         );
+         if(ci==7)
+            FileWriteString(out,"<td>"+(RG_JournalConditionIsComplete(conditions) ? "&#10003;" : "&#10007;")+"</td>");
+         else if(ci==14 && row[ci]==RG_JournalCheckMark())
+            FileWriteString(out,"<td>&#10003;</td>");
+         else if(ci==11 && row[ci]==RG_JournalCheckMark())
+            FileWriteString(out,"<td>&#10003;</td>");
+         else FileWriteString(out,"<td>"+RG_JournalHtmlEscape(row[ci])+"</td>");
       }
-      FileClose(h);
+      FileWriteString(out,"</tr>");
    }
-
-   ResetLastError();
-   FileFlush(out);
-   FileClose(out);
-
-   if(!FileIsExist(outFile))
-   {
-      g_RG_JournalLastExportError=GetLastError();
-      return(false);
-   }
-
-   return(true);
+   FileWriteString(out,"</table></body></html>"); FileFlush(out); FileClose(out);
+   int verify=FileOpen(target,FILE_TXT|FILE_READ|FILE_UNICODE|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   if(verify==INVALID_HANDLE){g_RG_JournalLastExportError=GetLastError();return(false);} string first=FileReadString(verify); FileClose(verify);
+   if(StringLen(first)==0){g_RG_JournalLastExportError=5002;return(false);} return(true);
 }
 
 bool RG_JournalExportAnalysis(datetime fromDate,datetime toDate,string &outFile)

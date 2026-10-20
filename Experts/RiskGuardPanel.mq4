@@ -1,5 +1,9 @@
 #property strict
 
+// Candle timer display: set false to hide the countdown from the chart.
+input bool RG_EnableCandleTimer = true;
+input color RG_CandleTimerColor = clrWhite;
+
 //====================================================
 // RiskGuard MT4
 // Main Expert Advisor
@@ -625,6 +629,79 @@ void RG_RestoreChartState()
    g_RG_ChartStateCaptured=false;
 }
 
+
+//====================================================
+// CANDLE TIMER
+//====================================================
+
+#define RG_CANDLE_TIMER_OBJECT "RG_CANDLE_TIMER"
+
+void RG_CandleTimerDelete()
+{
+   if(ObjectFind(0,RG_CANDLE_TIMER_OBJECT)>=0)
+      ObjectDelete(0,RG_CANDLE_TIMER_OBJECT);
+}
+
+void RG_CandleTimerUpdate()
+{
+   if(!RG_EnableCandleTimer)
+   {
+      RG_CandleTimerDelete();
+      return;
+   }
+
+   int periodSeconds=PeriodSeconds();
+   if(periodSeconds<=0)
+      periodSeconds=Period()*60;
+   if(periodSeconds<=0)
+      return;
+
+   datetime barOpen=iTime(Symbol(),Period(),0);
+   if(barOpen<=0)
+      return;
+
+   RefreshRates();
+   double livePrice=Bid;
+   if(livePrice<=0.0)
+      livePrice=iClose(Symbol(),Period(),0);
+   if(livePrice<=0.0)
+      return;
+
+   int remaining=(int)(barOpen+periodSeconds-TimeCurrent());
+   if(remaining<0)
+      remaining=0;
+
+   int hours=remaining/3600;
+   int minutes=(remaining%3600)/60;
+   int seconds=remaining%60;
+   string countdown;
+   if(hours>0)
+      countdown=StringFormat("%02d:%02d:%02d",hours,minutes,seconds);
+   else
+      countdown=StringFormat("%02d:%02d",minutes,seconds);
+
+   string caption=countdown;
+   if(ObjectFind(0,RG_CANDLE_TIMER_OBJECT)<0)
+   {
+      datetime initialTime=barOpen+periodSeconds+(periodSeconds/4);
+      if(!ObjectCreate(0,RG_CANDLE_TIMER_OBJECT,OBJ_TEXT,0,initialTime,livePrice))
+         return;
+      ObjectSetInteger(0,RG_CANDLE_TIMER_OBJECT,OBJPROP_ANCHOR,ANCHOR_LEFT);
+      ObjectSetInteger(0,RG_CANDLE_TIMER_OBJECT,OBJPROP_FONTSIZE,10);
+      ObjectSetString(0,RG_CANDLE_TIMER_OBJECT,OBJPROP_FONT,"Arial");
+      ObjectSetInteger(0,RG_CANDLE_TIMER_OBJECT,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(0,RG_CANDLE_TIMER_OBJECT,OBJPROP_HIDDEN,true);
+      ObjectSetInteger(0,RG_CANDLE_TIMER_OBJECT,OBJPROP_BACK,false);
+   }
+
+   // Place the label just to the right of the active candle, following its live price.
+   // A quarter-bar time offset creates a visible gap instead of overlapping the candle.
+   datetime labelTime=barOpen+periodSeconds+(periodSeconds/4);
+   ObjectMove(0,RG_CANDLE_TIMER_OBJECT,0,labelTime,livePrice);
+   ObjectSetInteger(0,RG_CANDLE_TIMER_OBJECT,OBJPROP_COLOR,RG_CandleTimerColor);
+   ObjectSetString(0,RG_CANDLE_TIMER_OBJECT,OBJPROP_TEXT,caption);
+}
+
 //====================================================
 // INIT
 //====================================================
@@ -632,6 +709,7 @@ void RG_RestoreChartState()
 int OnInit()
 {
    RG_CaptureChartState();
+   RG_CandleTimerUpdate();
 
    // Force a fresh read of current EA Inputs on every MT4 reinitialization.
    RG_RuntimeResetForInputs();
@@ -732,6 +810,10 @@ void OnDeinit(const int reason)
    }
 
    EventKillTimer();
+   // Preserve the candle timer object across timeframe/symbol chart changes.
+   // OnInit/OnTimer will reposition and refresh it immediately.
+   if(reason!=REASON_CHARTCHANGE)
+      RG_CandleTimerDelete();
    ChartSetInteger(0,CHART_EVENT_MOUSE_MOVE,false);
    ChartSetInteger(0,CHART_EVENT_MOUSE_WHEEL,false);
 
@@ -755,6 +837,7 @@ void OnDeinit(const int reason)
 
 void OnTimer()
 {
+   RG_CandleTimerUpdate();
    RG_SpecialTimesUpdate();
 
    if(!RG_LicenseIsValid())
@@ -764,12 +847,6 @@ void OnTimer()
       RG_LicenseApplyStatus();
       return;
    }
-
-   // If MT4's native Delete/Backspace handling removes Journal objects,
-   // recover the active editor on the next timer without changing the
-   // underlying keyboard behavior. This is only a resilience layer.
-   if(g_RG_GUI_JournalEditType>=0 && ObjectFind(0,RG_GUI_JV_NAMEEDIT)<0)
-      RG_GUI_CreateJournalRenameDialog();
 
    RG_RuntimeSyncInputDefaults();
    RG_NewsEngineUpdate();
@@ -804,7 +881,6 @@ void OnTick()
 
    RG_RuntimeSyncInputDefaults();
    RG_GUI_UpdateSessionVisualization();
-   RG_JournalUpdate();
    RG_ProcessPositionManager();
 
    // Manual RF is controlled by the position-row RF button.
@@ -877,7 +953,7 @@ bool RG_DoJournalExcelExport()
       if(exported)
          ObjectSetString(0,RG_GUI_JV_REPORT_SUM,OBJPROP_TEXT,"Excel Journal exported: "+outFile);
       else
-         ObjectSetString(0,RG_GUI_JV_REPORT_SUM,OBJPROP_TEXT,"Export failed. MT4 error: "+IntegerToString(g_RG_JournalLastExportError));
+         ObjectSetString(0,RG_GUI_JV_REPORT_SUM,OBJPROP_TEXT,"Export failed. MT4 error: "+IntegerToString(g_RG_JournalLastExportError)+" | DataPath: "+TerminalInfoString(TERMINAL_DATA_PATH));
    }
    ChartRedraw();
    return(exported);
@@ -977,21 +1053,12 @@ void OnChartEvent(
    }
 
    //=================================================
-   // ACCOUNT-WIDE JOURNAL SETTINGS SYNC
+   // JOURNAL CHECKLIST FOLLOWS MAIN CHART / INDICATOR RESIZE
    //=================================================
-   if(id==CHARTEVENT_CUSTOM+RG_JOURNAL_SYNC_EVENT_ID)
+   if(id==CHARTEVENT_CHART_CHANGE && RG_JournalPreviewIsOpen())
    {
-      // Never interrupt an active Pattern/Trigger/Condition editor.
-      // The next timer cycle will reload the shared settings after the
-      // editor is closed.
-      if(g_RG_GUI_JournalEditType>=0)
-      {
-         g_RG_JournalPendingSync=true;
-         return;
-      }
-
-      RG_JournalHandleSettingsSync();
-      RG_CreatePanel();
+      RG_GUI_DeleteJournalRev2Objects();
+      RG_GUI_CreateJournalPreviewPopup();
       ChartRedraw();
       return;
    }
@@ -1028,21 +1095,16 @@ void OnChartEvent(
    }
 
    //=================================================
-   // JOURNAL TRADE DESCRIPTION KEYBOARD INPUT
+   // JOURNAL TRADE DESCRIPTION KEYBOARD INPUT - FIX12
    //=================================================
-   if(id==CHARTEVENT_KEYDOWN && g_RG_GUI_JournalDescriptionOpen)
+   // Description uses a protected editor. Once the field is clicked, this
+   // handler owns Backspace/Delete/Enter and printable characters, so those
+   // keys never reach the old chart-object deletion path.
+   if(id==CHARTEVENT_KEYDOWN && g_RG_GUI_JournalDescriptionOpen && g_RG_GUI_JournalDescriptionEditFocused)
    {
       int k=(int)lparam;
-      if(k==13)
-      {
-         RG_JournalSetDescription(g_RG_GUI_JournalDescriptionTicket,g_RG_GUI_JournalDescriptionBuffer);
-         RG_GUI_DeleteJournalDescriptionPanel();
-         RG_CreatePanel();
-         RG_UpdateGUI();
-         ChartRedraw();
-         return;
-      }
-      if(k==27)
+
+      if(k==27) // ESC = cancel description edit
       {
          RG_GUI_DeleteJournalDescriptionPanel();
          RG_CreatePanel();
@@ -1050,25 +1112,46 @@ void OnChartEvent(
          ChartRedraw();
          return;
       }
-      if(k==8)
+
+      if(k==13) // ENTER = newline; SAVE button commits the text
+      {
+         if(StringLen(g_RG_GUI_JournalDescriptionBuffer)<240)
+            g_RG_GUI_JournalDescriptionBuffer += "\n";
+         if(ObjectFind(0,RG_GUI_JV_DESC_EDIT)>=0)
+            ObjectSetString(0,RG_GUI_JV_DESC_EDIT,OBJPROP_TEXT,g_RG_GUI_JournalDescriptionBuffer);
+         ChartRedraw();
+         return;
+      }
+
+      if(k==8) // BACKSPACE
       {
          int n=StringLen(g_RG_GUI_JournalDescriptionBuffer);
-         if(n>0) g_RG_GUI_JournalDescriptionBuffer=StringSubstr(g_RG_GUI_JournalDescriptionBuffer,0,n-1);
-         if(ObjectFind(0,RG_GUI_JV_DESC_EDIT)>=0) ObjectSetString(0,RG_GUI_JV_DESC_EDIT,OBJPROP_TEXT,g_RG_GUI_JournalDescriptionBuffer);
+         if(n>0)
+            g_RG_GUI_JournalDescriptionBuffer=StringSubstr(g_RG_GUI_JournalDescriptionBuffer,0,n-1);
+         if(ObjectFind(0,RG_GUI_JV_DESC_EDIT)>=0)
+            ObjectSetString(0,RG_GUI_JV_DESC_EDIT,OBJPROP_TEXT,g_RG_GUI_JournalDescriptionBuffer);
          return;
       }
-      if(k==46)
+
+      if(k==46) // DELETE = delete the current description text
       {
          g_RG_GUI_JournalDescriptionBuffer="";
-         if(ObjectFind(0,RG_GUI_JV_DESC_EDIT)>=0) ObjectSetString(0,RG_GUI_JV_DESC_EDIT,OBJPROP_TEXT,"");
+         if(ObjectFind(0,RG_GUI_JV_DESC_EDIT)>=0)
+            ObjectSetString(0,RG_GUI_JV_DESC_EDIT,OBJPROP_TEXT,"");
          return;
       }
-      string ch=RG_GUI_JournalKeyChar(k);
+
+      string ch=RG_GUI_JournalDescriptionKeyText(k,sparam);
       if(ch!="" && StringLen(g_RG_GUI_JournalDescriptionBuffer)<240)
       {
          g_RG_GUI_JournalDescriptionBuffer+=ch;
-         if(ObjectFind(0,RG_GUI_JV_DESC_EDIT)>=0) ObjectSetString(0,RG_GUI_JV_DESC_EDIT,OBJPROP_TEXT,g_RG_GUI_JournalDescriptionBuffer);
+         if(ObjectFind(0,RG_GUI_JV_DESC_EDIT)>=0)
+            ObjectSetString(0,RG_GUI_JV_DESC_EDIT,OBJPROP_TEXT,g_RG_GUI_JournalDescriptionBuffer);
+         return;
       }
+
+      // Consume all other keyboard events while the Description editor has
+      // focus. This is what prevents Backspace from deleting chart objects.
       return;
    }
 
@@ -1102,11 +1185,6 @@ void OnChartEvent(
             RG_GUI_JournalRestoreChartObjects();
             ObjectDelete(0,RG_GUI_JV_CFG); ObjectDelete(0,RG_GUI_JV_CFG+"_T"); ObjectDelete(0,RG_GUI_JV_NAMEEDIT); ObjectDelete(0,RG_GUI_JV_OK); ObjectDelete(0,RG_GUI_JV_CANCEL); ObjectDelete(0,RG_GUI_JV_CLEAR);
             g_RG_GUI_JournalEditIndex=-1; g_RG_GUI_JournalEditType=-1; g_RG_GUI_JournalEditFocused=false;
-            if(RG_JournalHasPendingSync())
-            {
-               RG_JournalHandleSettingsSync();
-               RG_JournalClearPendingSync();
-            }
             RG_CreatePanel();
             ChartRedraw();
          }
@@ -1119,6 +1197,15 @@ void OnChartEvent(
    //=================================================
    if(id==CHARTEVENT_OBJECT_CLICK)
    {
+      // Restore Special Times cleanup action. Keep the current checklist
+      // resize handling and all newer UI code intact.
+      if(sparam==RG_GUI_TOOLS_PREFIX+"CLEAR_PAST_SPECIAL_TIMES")
+      {
+         RG_SpecialTimesClearPast();
+         RG_SpecialTimesUpdate();
+         ChartRedraw();
+         return;
+      }
       if(sparam==RG_GUI_POS_SCROLL_TRACK)
       {
          RG_GUI_HandlePositionScrollbarClick((int)dparam);
@@ -1159,6 +1246,15 @@ void OnChartEvent(
          ChartRedraw();
          return;
       }
+   }
+
+   //=================================================
+   // JOURNAL TRADE DESCRIPTION FINISH EDIT
+   //=================================================
+   if(id==CHARTEVENT_OBJECT_ENDEDIT && sparam==RG_GUI_JV_DESC_EDIT)
+   {
+      g_RG_GUI_JournalDescriptionBuffer=ObjectGetString(0,sparam,OBJPROP_TEXT);
+      return;
    }
 
    //=================================================
@@ -1227,11 +1323,19 @@ void OnChartEvent(
       if(sparam==RG_GUI_JV_REPORT_FROM)
       {
          g_RG_GUI_JournalReportFrom=ObjectGetString(0,sparam,OBJPROP_TEXT);
+         g_RG_GUI_JournalDataPage=0;
+         RG_GUI_UpdateJournalRangeSummary();
+         if(g_RG_GUI_JournalReportOpen) RG_GUI_CreateJournalReportPanel();
+         ChartRedraw();
          return;
       }
       if(sparam==RG_GUI_JV_REPORT_TO)
       {
          g_RG_GUI_JournalReportTo=ObjectGetString(0,sparam,OBJPROP_TEXT);
+         g_RG_GUI_JournalDataPage=0;
+         RG_GUI_UpdateJournalRangeSummary();
+         if(g_RG_GUI_JournalReportOpen) RG_GUI_CreateJournalReportPanel();
+         ChartRedraw();
          return;
       }
    }
@@ -1263,11 +1367,15 @@ void OnChartEvent(
    {
       if(sparam==RG_GUI_JV_DESC_EDIT)
       {
+         // FIX12: clicking the Description field gives it logical keyboard
+         // focus. The object itself stays read-only; OnChartEvent owns the
+         // actual text changes.
+         g_RG_GUI_JournalDescriptionEditFocused=true;
          ObjectSetInteger(0,sparam,OBJPROP_READONLY,false);
-         ObjectSetInteger(0,sparam,OBJPROP_ZORDER,50000);
-         ObjectSetInteger(0,sparam,OBJPROP_SELECTED,false);
-         g_RG_GUI_JournalDescriptionBuffer=ObjectGetString(0,sparam,OBJPROP_TEXT);
-         ChartRedraw();
+         ObjectSetInteger(0,sparam,OBJPROP_SELECTABLE,true);
+         ObjectSetInteger(0,sparam,OBJPROP_SELECTED,true);
+         ObjectSetInteger(0,sparam,OBJPROP_ZORDER,65000);
+         ChartSetInteger(0,CHART_KEYBOARD_CONTROL,false);
          return;
       }
 
@@ -1288,10 +1396,11 @@ void OnChartEvent(
          // the next chart/tab event.
          g_RG_GUI_JournalSettingsOpen=false;
          g_RG_GUI_JournalReportOpen=true;
-         g_RG_GUI_JournalReportFrom=TimeToString(TimeCurrent()-30*86400,TIME_DATE);
-         g_RG_GUI_JournalReportTo=TimeToString(TimeCurrent(),TIME_DATE);
+         if(g_RG_GUI_JournalReportFrom=="") g_RG_GUI_JournalReportFrom=TimeToString(RG_JournalGetEarliestHistoryDate()>0?RG_JournalGetEarliestHistoryDate():TimeCurrent(),TIME_DATE);
+         if(g_RG_GUI_JournalReportTo=="") g_RG_GUI_JournalReportTo=TimeToString(TimeCurrent(),TIME_DATE);
          g_RG_GUI_JournalReportEditField=0;
          g_RG_GUI_JournalReportEditFocused=false;
+         g_RG_GUI_JournalDataPage=0;
          ChartSetInteger(0,CHART_KEYBOARD_CONTROL,true);
          RG_GUI_CreateJournalReportPanel();
          ChartRedraw();
@@ -1310,21 +1419,60 @@ void OnChartEvent(
       {
          g_RG_GUI_JournalReportFrom=TimeToString(TimeCurrent(),TIME_DATE);
          g_RG_GUI_JournalReportTo=g_RG_GUI_JournalReportFrom;
+         g_RG_GUI_JournalDataPage=0;
          if(ObjectFind(0,RG_GUI_JV_REPORT_FROM)>=0) ObjectSetString(0,RG_GUI_JV_REPORT_FROM,OBJPROP_TEXT,g_RG_GUI_JournalReportFrom);
          if(ObjectFind(0,RG_GUI_JV_REPORT_TO)>=0) ObjectSetString(0,RG_GUI_JV_REPORT_TO,OBJPROP_TEXT,g_RG_GUI_JournalReportTo);
+         RG_GUI_UpdateJournalRangeSummary();
+         if(g_RG_GUI_JournalReportOpen) RG_GUI_CreateJournalReportPanel();
          ChartRedraw();
          return;
       }
-      if(sparam==RG_GUI_JV_REPORT_WEEK)
+      if(sparam==RG_GUI_JV_REPORT_WEEK || sparam==RG_GUI_JV_REPORT_MONTH || sparam==RG_GUI_JV_REPORT_ALL)
       {
          datetime now=TimeCurrent();
-         int dow=TimeDayOfWeek(now);
-         int back=(dow==0 ? 6 : dow-1);
-         datetime monday=now-back*86400;
-         g_RG_GUI_JournalReportFrom=TimeToString(monday,TIME_DATE);
-         g_RG_GUI_JournalReportTo=TimeToString(now,TIME_DATE);
+         if(sparam==RG_GUI_JV_REPORT_WEEK)
+         {
+            int dow=TimeDayOfWeek(now);
+            int back=(dow==0 ? 6 : dow-1);
+            datetime monday=now-back*86400;
+            g_RG_GUI_JournalReportFrom=TimeToString(monday,TIME_DATE);
+            g_RG_GUI_JournalReportTo=TimeToString(now,TIME_DATE);
+         }
+         else if(sparam==RG_GUI_JV_REPORT_MONTH)
+         {
+            string monthStart=StringFormat("%04d.%02d.01",TimeYear(now),TimeMonth(now));
+            g_RG_GUI_JournalReportFrom=monthStart;
+            g_RG_GUI_JournalReportTo=TimeToString(now,TIME_DATE);
+         }
+         else
+         {
+            datetime firstHistory=RG_JournalGetEarliestHistoryDate();
+            g_RG_GUI_JournalReportFrom=TimeToString(firstHistory>0?firstHistory:now,TIME_DATE);
+            g_RG_GUI_JournalReportTo=TimeToString(now,TIME_DATE);
+         }
+         g_RG_GUI_JournalDataPage=0;
          if(ObjectFind(0,RG_GUI_JV_REPORT_FROM)>=0) ObjectSetString(0,RG_GUI_JV_REPORT_FROM,OBJPROP_TEXT,g_RG_GUI_JournalReportFrom);
          if(ObjectFind(0,RG_GUI_JV_REPORT_TO)>=0) ObjectSetString(0,RG_GUI_JV_REPORT_TO,OBJPROP_TEXT,g_RG_GUI_JournalReportTo);
+         RG_GUI_UpdateJournalRangeSummary();
+         if(g_RG_GUI_JournalReportOpen) RG_GUI_CreateJournalReportPanel();
+         ChartRedraw();
+         return;
+      }
+      if(sparam==RG_GUI_JV_REPORT_PREV)
+      {
+         if(g_RG_GUI_JournalDataPage>0) g_RG_GUI_JournalDataPage--;
+         RG_GUI_CreateJournalReportPanel();
+         ChartRedraw();
+         return;
+      }
+      if(sparam==RG_GUI_JV_REPORT_NEXT)
+      {
+         datetime fd=StrToTime(g_RG_GUI_JournalReportFrom), td=StrToTime(g_RG_GUI_JournalReportTo);
+         if(fd<=0) fd=TimeCurrent()-30*86400; if(td<=0) td=TimeCurrent();
+         RG_JournalRecord rrRows[]; int rrCount=RG_JournalLoadClosedRecords(rrRows,fd,td);
+         int rrMax=(rrCount<=0?0:(rrCount-1)/20);
+         if(g_RG_GUI_JournalDataPage<rrMax) g_RG_GUI_JournalDataPage++;
+         RG_GUI_CreateJournalReportPanel();
          ChartRedraw();
          return;
       }
@@ -1336,7 +1484,7 @@ void OnChartEvent(
 
       if(sparam==RG_GUI_JV_DESC_SAVE)
       {
-         string d=(ObjectFind(0,RG_GUI_JV_DESC_EDIT)>=0 ? ObjectGetString(0,RG_GUI_JV_DESC_EDIT,OBJPROP_TEXT) : g_RG_GUI_JournalDescriptionBuffer);
+         string d=g_RG_GUI_JournalDescriptionBuffer;
          RG_JournalSetDescription(g_RG_GUI_JournalDescriptionTicket,d);
          RG_GUI_DeleteJournalDescriptionPanel();
          RG_CreatePanel();
@@ -1423,11 +1571,6 @@ void OnChartEvent(
          RG_GUI_JournalRestoreChartObjects();
          ObjectDelete(0,RG_GUI_JV_CFG); ObjectDelete(0,RG_GUI_JV_CFG+"_T"); ObjectDelete(0,RG_GUI_JV_NAMEEDIT); ObjectDelete(0,RG_GUI_JV_OK); ObjectDelete(0,RG_GUI_JV_CANCEL); ObjectDelete(0,RG_GUI_JV_CLEAR);
          g_RG_GUI_JournalEditIndex=-1; g_RG_GUI_JournalEditType=-1; g_RG_GUI_JournalEditFocused=false;
-         if(RG_JournalHasPendingSync())
-         {
-            RG_JournalHandleSettingsSync();
-            RG_JournalClearPendingSync();
-         }
          RG_CreatePanel();
          ChartRedraw();
          return;
@@ -1437,11 +1580,6 @@ void OnChartEvent(
          RG_GUI_JournalRestoreChartObjects();
          ObjectDelete(0,RG_GUI_JV_CFG); ObjectDelete(0,RG_GUI_JV_CFG+"_T"); ObjectDelete(0,RG_GUI_JV_NAMEEDIT); ObjectDelete(0,RG_GUI_JV_OK); ObjectDelete(0,RG_GUI_JV_CANCEL); ObjectDelete(0,RG_GUI_JV_CLEAR);
          g_RG_GUI_JournalEditIndex=-1; g_RG_GUI_JournalEditType=-1; g_RG_GUI_JournalEditFocused=false;
-         if(RG_JournalHasPendingSync())
-         {
-            RG_JournalHandleSettingsSync();
-            RG_JournalClearPendingSync();
-         }
          ChartRedraw();
          return;
       }
@@ -1449,6 +1587,22 @@ void OnChartEvent(
       {
          RG_JournalToggleEnabled();
          RG_CreatePanel();
+         return;
+      }
+      if(sparam==RG_GUI_JV_ENTRY_MODE)
+      {
+         RG_JournalToggleEntryMode();
+         RG_CreatePanel();
+         return;
+      }
+      if(sparam==RG_GUI_JV_AFTER_SAVE || sparam==RG_GUI_JV_AFTER_SKIP)
+      {
+         bool saveAfter=(sparam==RG_GUI_JV_AFTER_SAVE);
+         int afterTicket=RG_JournalFinishAfterEntry(saveAfter);
+         RG_GUI_DeleteJournalRev2Objects();
+         if(afterTicket>0) RG_GUI_OpenJournalDescription(afterTicket);
+         RG_CreatePanel();
+         ChartRedraw();
          return;
       }
       if(sparam==RG_GUI_JV_CFG)
@@ -1556,6 +1710,16 @@ void OnChartEvent(
       if(sparam==RG_GUI_SessionControlName("CURRENT_VALUE"))
       {
          RG_GUI_ToggleSessionsCurrent();
+         return;
+      }
+      if(sparam==RG_GUI_SessionControlName("PAST_VALUE"))
+      {
+         RG_GUI_ToggleSessionsPast();
+         return;
+      }
+      if(sparam==RG_GUI_SessionControlName("FUTURE_ON_VALUE"))
+      {
+         RG_GUI_ToggleSessionsFutureEnabled();
          return;
       }
       if(sparam==RG_GUI_SessionControlName("FUTURE_VALUE"))
@@ -1911,19 +2075,23 @@ void OnChartEvent(
 
             if(ticket>0)
             {
-               if(RG_JournalEnabled())
+               if(RG_JournalEnabled() && RG_JournalEntryMode()==0)
                {
                   if(OrderSelect(ticket,SELECT_BY_TICKET,MODE_TRADES))
                      RG_JournalAttachEntryMeta(ticket,OrderOpenPrice(),OrderStopLoss(),OrderTakeProfit(),OrderLots());
                }
-               RG_GUI_OpenJournalDescription(ticket);
                RG_JournalEndPreview();
+               if(RG_JournalEnabled() && RG_JournalEntryMode()==1)
+                  RG_JournalBeginAfterEntry(ticket,direction);
                RG_RuntimeClearPreview();
                RG_RuntimeClearPreviewSnapshot();
                RG_ClearMainPreviewState();
                RG_TrailingSetupClose();
    RG_TV_DeleteTradeVisualization();
                RG_ClearPendingMode();
+               RG_GUI_DeleteJournalRev2Objects();
+               RG_CreatePanel();
+               if(!RG_JournalEnabled() || RG_JournalEntryMode()==0) RG_GUI_OpenJournalDescription(ticket);
 
                RG_MainStatus(
                   RG_PendingTypeName(pendingType)+
@@ -1954,12 +2122,14 @@ void OnChartEvent(
 
             if(ticket>0)
             {
-               if(RG_JournalEnabled())
+               if(RG_JournalEnabled() && RG_JournalEntryMode()==0)
                {
                   if(OrderSelect(ticket,SELECT_BY_TICKET,MODE_TRADES))
                      RG_JournalAttachEntryMeta(ticket,OrderOpenPrice(),OrderStopLoss(),OrderTakeProfit(),OrderLots());
                }
                RG_JournalEndPreview();
+               if(RG_JournalEnabled() && RG_JournalEntryMode()==1)
+                  RG_JournalBeginAfterEntry(ticket,direction);
                RG_RuntimeClearPreview();
                RG_RuntimeClearPreviewSnapshot();
                RG_ClearMainPreviewState();
@@ -1969,7 +2139,7 @@ void OnChartEvent(
                RG_ClearPendingMode();
                RG_GUI_DeleteJournalRev2Objects();
                RG_CreatePanel();
-               RG_GUI_OpenJournalDescription(ticket);
+               if(!RG_JournalEnabled() || RG_JournalEntryMode()==0) RG_GUI_OpenJournalDescription(ticket);
 
                RG_MainStatus(
                   (direction==OP_BUY ? "BUY Opened #" : "SELL Opened #")+
@@ -2135,7 +2305,10 @@ void OnChartEvent(
          return;
       }
 
-      // Per-position trailing setup
+      // Per-position trailing control:
+      // If trailing is already ON, clicking TR turns it OFF immediately.
+      // If it is OFF, open the setup window so the user can configure
+      // and enable trailing for this position.
       if(RG_GUI_IsPositionObject(
          sparam,RG_GUI_POS_TRAILING))
       {
@@ -2146,8 +2319,16 @@ void OnChartEvent(
 
          if(ticket>0)
          {
-            RG_TrailingSetupOpen(ticket);
-            RG_MainStatus("Trailing setup");
+            if(RG_TrailingIsEnabled(ticket))
+            {
+               RG_SetTrailingEnabled(ticket,false);
+               RG_MainStatus("Trailing OFF");
+            }
+            else
+            {
+               RG_TrailingSetupOpen(ticket);
+               RG_MainStatus("Trailing setup");
+            }
          }
 
          RG_UpdateGUI();

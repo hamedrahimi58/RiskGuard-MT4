@@ -76,6 +76,11 @@ bool   g_RG_AllowSell = true;
 bool g_RG_RuntimeReady     = false;
 bool g_RG_SettingsApplied = false;
 
+// Performance guard: account-wide settings are synchronized at most once
+// per timer interval. This function may still be called from GUI/tick code,
+// but it performs no GlobalVariable I/O until the interval has elapsed.
+uint g_RG_LastAccountSyncMs = 0;
+
 int  g_RG_PreviewDirection = 0;
 bool g_RG_PreviewActive = false;
 
@@ -221,6 +226,7 @@ void RG_RuntimeResetForInputs()
 {
    g_RG_RuntimeReady=false;
    g_RG_SettingsApplied=false;
+   g_RG_LastAccountSyncMs=0;
 
    string lotKey=RG_RuntimeAccountKey("FIXED_LOT");
    string maxKey=RG_RuntimeAccountKey("MAX_OPEN_POSITIONS");
@@ -289,6 +295,14 @@ void RG_RuntimeResetForInputs()
 // restart.
 void RG_RuntimeSyncAccountInputs()
 {
+   // Keep account-wide settings synchronized without doing terminal
+   // GlobalVariable I/O on every tick. This is especially important when
+   // several RiskGuard charts are open at the same time.
+   uint now=GetTickCount();
+   if(g_RG_LastAccountSyncMs!=0 && (uint)(now-g_RG_LastAccountSyncMs)<750)
+      return;
+   g_RG_LastAccountSyncMs=now;
+
    string lotKey=RG_RuntimeAccountKey("FIXED_LOT");
    string maxKey=RG_RuntimeAccountKey("MAX_OPEN_POSITIONS");
    string lastLotKey=RG_RuntimeAccountKey("LASTINPUT_LOT_"+IntegerToString((int)ChartID()));
@@ -300,21 +314,26 @@ void RG_RuntimeSyncAccountInputs()
    bool maxChanged=false;
    bool maxLotChanged=false;
 
-   if(GlobalVariableCheck(lastLotKey))
+   bool hasLastLot=GlobalVariableCheck(lastLotKey);
+   bool hasLastMax=GlobalVariableCheck(lastMaxKey);
+   bool hasLastMaxLot=GlobalVariableCheck(lastMaxLotKey);
+
+   if(hasLastLot)
       lotChanged=(MathAbs(FixedLot-GlobalVariableGet(lastLotKey))>0.0000001);
    else
       GlobalVariableSet(lastLotKey,FixedLot);
 
-   if(GlobalVariableCheck(lastMaxKey))
+   if(hasLastMax)
       maxChanged=(MaxOpenPositions!=(int)MathRound(GlobalVariableGet(lastMaxKey)));
    else
       GlobalVariableSet(lastMaxKey,(double)MaxOpenPositions);
 
-   if(GlobalVariableCheck(lastMaxLotKey))
+   if(hasLastMaxLot)
       maxLotChanged=(MathAbs(MaxLot-GlobalVariableGet(lastMaxLotKey))>0.0000001);
    else
       GlobalVariableSet(lastMaxLotKey,MaxLot);
 
+   // Only publish a value when this chart's Inputs actually changed.
    if(lotChanged && FixedLot>0.0)
       GlobalVariableSet(lotKey,FixedLot);
 
@@ -324,12 +343,17 @@ void RG_RuntimeSyncAccountInputs()
    if(maxLotChanged && MaxLot>0.0)
       GlobalVariableSet(maxLotKey,MaxLot);
 
-   // Always advance this chart's snapshots after processing the change.
-   GlobalVariableSet(lastLotKey,FixedLot);
-   GlobalVariableSet(lastMaxKey,(double)MaxOpenPositions);
-   GlobalVariableSet(lastMaxLotKey,MaxLot);
+   // Update per-chart snapshots only after a real change or first creation.
+   if(lotChanged || !hasLastLot)
+      GlobalVariableSet(lastLotKey,FixedLot);
 
-   // Now consume the single account-wide source of truth.
+   if(maxChanged || !hasLastMax)
+      GlobalVariableSet(lastMaxKey,(double)MaxOpenPositions);
+
+   if(maxLotChanged || !hasLastMaxLot)
+      GlobalVariableSet(lastMaxLotKey,MaxLot);
+
+   // Consume the single account-wide source of truth.
    if(GlobalVariableCheck(lotKey))
       g_RG_FixedLot=GlobalVariableGet(lotKey);
    else if(FixedLot>0.0)
