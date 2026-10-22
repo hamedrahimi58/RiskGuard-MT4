@@ -1095,6 +1095,30 @@ void OnChartEvent(
    }
 
    //=================================================
+   // JOURNAL DESCRIPTION CLICK-TO-FOCUS FALLBACK
+   //=================================================
+   // Some MT4 builds do not send CHARTEVENT_OBJECT_CLICK for OBJ_EDIT.
+   // Detect clicks by chart coordinates so the custom editor always gains focus.
+   if(id==CHARTEVENT_CLICK && g_RG_GUI_JournalDescriptionOpen &&
+      ObjectFind(0,RG_GUI_JV_DESC_EDIT)>=0)
+   {
+      int dx=(int)ObjectGetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_XDISTANCE);
+      int dy=(int)ObjectGetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_YDISTANCE);
+      int dw=(int)ObjectGetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_XSIZE);
+      int dh=(int)ObjectGetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_YSIZE);
+      int mx=(int)lparam;
+      int my=(int)dparam;
+      if(mx>=dx && mx<=dx+dw && my>=dy && my<=dy+dh)
+      {
+         g_RG_GUI_JournalDescriptionEditFocused=true;
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTED,false);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTABLE,false);
+         ChartSetInteger(0,CHART_KEYBOARD_CONTROL,true);
+         return;
+      }
+   }
+
+   //=================================================
    // JOURNAL TRADE DESCRIPTION KEYBOARD INPUT - FIX12
    //=================================================
    // Description uses a protected editor. Once the field is clicked, this
@@ -1372,10 +1396,12 @@ void OnChartEvent(
          // actual text changes.
          g_RG_GUI_JournalDescriptionEditFocused=true;
          ObjectSetInteger(0,sparam,OBJPROP_READONLY,false);
-         ObjectSetInteger(0,sparam,OBJPROP_SELECTABLE,true);
-         ObjectSetInteger(0,sparam,OBJPROP_SELECTED,true);
+         // Keep native OBJ_EDIT from stealing keyboard focus; our custom
+         // CHARTEVENT_KEYDOWN handler owns the text buffer.
+         ObjectSetInteger(0,sparam,OBJPROP_SELECTABLE,false);
+         ObjectSetInteger(0,sparam,OBJPROP_SELECTED,false);
          ObjectSetInteger(0,sparam,OBJPROP_ZORDER,65000);
-         ChartSetInteger(0,CHART_KEYBOARD_CONTROL,false);
+         ChartSetInteger(0,CHART_KEYBOARD_CONTROL,true);
          return;
       }
 

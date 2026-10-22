@@ -1,4 +1,4 @@
-﻿#ifndef __RG_JOURNAL_MQH__
+#ifndef __RG_JOURNAL_MQH__
 #define __RG_JOURNAL_MQH__
 
 //====================================================
@@ -809,20 +809,53 @@ string RG_JournalGetDescription(int ticket)
 {
    string f=RG_JournalDescriptionFile(ticket);
    if(!FileIsExist(f)) return("");
-   int h=FileOpen(f,FILE_TXT|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE);
+
+   // Description files are stored as UTF-8 with a BOM. Binary reading avoids
+   // ANSI conversion and preserves Persian text and embedded line breaks.
+   int h=FileOpen(f,FILE_BIN|FILE_READ|FILE_SHARE_READ|FILE_SHARE_WRITE);
    if(h==INVALID_HANDLE) return("");
-   string v=FileReadString(h);
+   int size=(int)FileSize(h);
+   if(size<=0)
+   {
+      FileClose(h);
+      return("");
+   }
+
+   uchar bytes[];
+   ArrayResize(bytes,size);
+   int count=(int)FileReadArray(h,bytes,0,size);
    FileClose(h);
-   return(v);
+   if(count<=0) return("");
+
+   // New UTF-8 format.
+   if(count>=3 && bytes[0]==0xEF && bytes[1]==0xBB && bytes[2]==0xBF)
+      return(CharArrayToString(bytes,3,count-3,CP_UTF8));
+
+   // Backward compatibility: older Description files were written using the
+   // terminal's ANSI code page.
+   return(CharArrayToString(bytes,0,count,CP_ACP));
 }
 
 void RG_JournalSetDescription(int ticket,string description)
 {
    if(ticket<=0) return;
    string f=RG_JournalDescriptionFile(ticket);
-   int h=FileOpen(f,FILE_TXT|FILE_WRITE|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   int h=FileOpen(f,FILE_BIN|FILE_WRITE|FILE_SHARE_READ|FILE_SHARE_WRITE);
    if(h==INVALID_HANDLE) return;
-   FileWriteString(h,description);
+
+   // UTF-8 BOM allows reliable encoding detection while remaining Excel/tool
+   // friendly. Write the text bytes without StringToCharArray's trailing NUL.
+   uchar bom[3];
+   bom[0]=0xEF;
+   bom[1]=0xBB;
+   bom[2]=0xBF;
+   FileWriteArray(h,bom,0,3);
+
+   uchar bytes[];
+   int chars=StringToCharArray(description,bytes,0,WHOLE_ARRAY,CP_UTF8);
+   if(chars>1)
+      FileWriteArray(h,bytes,0,chars-1);
+
    FileClose(h);
 }
 

@@ -9,6 +9,16 @@
 #include <Trade/RG_RiskFree.mqh>
 #include <RG_SpecialTimes.mqh>
 
+// Windows keyboard translation for Persian/Arabic layouts in Description.
+// The chart event supplies virtual-key codes, not Unicode text.
+#import "user32.dll"
+short GetAsyncKeyState(int vKey);
+int   GetKeyboardState(uchar &lpKeyState[]);
+long  GetKeyboardLayout(uint idThread);
+uint  MapVirtualKeyExW(uint uCode,uint uMapType,long dwhkl);
+int   ToUnicodeEx(uint wVirtKey,uint wScanCode,uchar &lpKeyState[],ushort &pwszBuff[],int cchBuff,uint wFlags,long dwhkl);
+#import
+
 //====================================================
 // RiskGuard MT4
 // GUI / PRE-TRADE CONFIRMATION
@@ -5190,15 +5200,36 @@ string RG_GUI_JournalKeyChar(int key)
 
 string RG_GUI_JournalDescriptionKeyText(int key,string flags)
 {
-   // On CHARTEVENT_KEYDOWN MT4 may provide the actual translated Unicode
-   // character through sparam. Use it first so Persian/Arabic keyboard
-   // layouts are preserved. Modifier/state strings are ignored unless they
-   // are a single printable character.
-   if(StringLen(flags)==1)
+   // CHARTEVENT_KEYDOWN supplies a virtual key, not a translated character.
+   // Ask Windows to translate it using the active keyboard layout.
+   if(key<32 || key>255) return("");
+
+   uchar state[256];
+   ArrayInitialize(state,0);
+   GetKeyboardState(state);
+
+   // Refresh modifier states because the MQL event callback can lag the
+   // thread's keyboard-state snapshot.
+   if(GetAsyncKeyState(16)<0) state[16]=128; // Shift
+   if(GetAsyncKeyState(17)<0) state[17]=128; // Ctrl
+   if(GetAsyncKeyState(18)<0) state[18]=128; // Alt
+
+   long layout=GetKeyboardLayout(0);
+   if(layout!=0)
    {
-      int c=StringGetChar(flags,0);
-      if(c>=32) return(flags);
+      uint scan=MapVirtualKeyExW((uint)key,0,layout);
+      ushort outChars[8];
+      ArrayInitialize(outChars,0);
+      int count=ToUnicodeEx((uint)key,scan,state,outChars,8,0,layout);
+      if(count>0 && outChars[0]>=32 && outChars[0]!=127)
+      {
+         string result=" ";
+         StringSetChar(result,0,(int)outChars[0]);
+         return(result);
+      }
    }
+
+   // Keep the known-safe ASCII path as a fallback.
    return(RG_GUI_JournalKeyChar(key));
 }
 
@@ -5478,7 +5509,7 @@ void RG_GUI_OpenJournalDescription(int ticket)
    g_RG_GUI_JournalDescriptionOpen=true;
    g_RG_GUI_JournalDescriptionEditFocused=false;
    g_RG_GUI_JournalDescriptionPrevKeyboardControl=(bool)ChartGetInteger(0,CHART_KEYBOARD_CONTROL);
-   ChartSetInteger(0,CHART_KEYBOARD_CONTROL,false);
+   ChartSetInteger(0,CHART_KEYBOARD_CONTROL,true);
    g_RG_GUI_JournalEditType=-1;
    g_RG_GUI_JournalEditFocused=false;
    g_RG_GUI_JournalEditReplaceFirst=false;
@@ -5509,13 +5540,13 @@ void RG_GUI_CreateJournalDescriptionPanel()
       if(ObjectFind(0,RG_GUI_JV_DESC_EDIT)>=0)
       {
          ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_READONLY,false);
-         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTABLE,true);
-         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTED,true);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTABLE,false);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTED,false);
          ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_ZORDER,65000);
          ObjectSetString(0,RG_GUI_JV_DESC_EDIT,OBJPROP_FONT,"Tahoma");
          RG_GUI_JournalProtectChartObjects();
-         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTABLE,true);
-         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTED,true);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTABLE,false);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTED,false);
          ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_READONLY,false);
          ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_ZORDER,65000);
       }
@@ -5526,8 +5557,8 @@ void RG_GUI_CreateJournalDescriptionPanel()
       RG_GUI_JournalProtectChartObjects();
       if(ObjectFind(0,RG_GUI_JV_DESC_EDIT)>=0)
       {
-         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTABLE,true);
-         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTED,true);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTABLE,false);
+         ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_SELECTED,false);
          ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_READONLY,false);
          ObjectSetInteger(0,RG_GUI_JV_DESC_EDIT,OBJPROP_ZORDER,65000);
       }
