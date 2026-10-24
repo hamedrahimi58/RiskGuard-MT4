@@ -1,5 +1,8 @@
 #property strict
 
+// Temporarily suppress MT4 chart shortcuts for a Backspace key press only.
+bool g_RG_BackspaceKeyboardRestorePending=false;
+
 // Candle timer display: set false to hide the countdown from the chart.
 input bool RG_EnableCandleTimer = true;
 input color RG_CandleTimerColor = clrWhite;
@@ -708,6 +711,8 @@ void RG_CandleTimerUpdate()
 
 int OnInit()
 {
+   // Recover user chart objects stranded non-selectable by an earlier build.
+   RG_GUI_JournalRecoverUserChartObjects();
    RG_CaptureChartState();
    RG_CandleTimerUpdate();
 
@@ -810,6 +815,9 @@ void OnDeinit(const int reason)
    }
 
    EventKillTimer();
+   RG_GUI_JournalRestoreChartObjects();
+   ChartSetInteger(0,CHART_KEYBOARD_CONTROL,true);
+   g_RG_BackspaceKeyboardRestorePending=false;
    // Preserve the candle timer object across timeframe/symbol chart changes.
    // OnInit/OnTimer will reposition and refresh it immediately.
    if(reason!=REASON_CHARTCHANGE)
@@ -837,6 +845,9 @@ void OnDeinit(const int reason)
 
 void OnTimer()
 {
+   // Do not restore chart keyboard control from the timer immediately after
+   // Backspace. MT4 may process its native chart shortcut after CHARTEVENT_KEYDOWN.
+   // Keyboard control is restored on the next mouse interaction instead.
    RG_CandleTimerUpdate();
    RG_SpecialTimesUpdate();
 
@@ -1045,6 +1056,32 @@ void OnChartEvent(
    const double &dparam,
    const string &sparam)
 {
+   // Restore keyboard control only after a subsequent mouse interaction.
+   // Restoring it on the next timer tick was too early on some MT4 builds,
+   // allowing the terminal's native Backspace shortcut to delete chart objects.
+   if(g_RG_BackspaceKeyboardRestorePending &&
+      (id==CHARTEVENT_MOUSE_MOVE ||
+       id==CHARTEVENT_CLICK ||
+       id==CHARTEVENT_OBJECT_CLICK ||
+       id==CHARTEVENT_OBJECT_DRAG ||
+       id==CHARTEVENT_OBJECT_CHANGE))
+   {
+      ChartSetInteger(0,CHART_KEYBOARD_CONTROL,true);
+      g_RG_BackspaceKeyboardRestorePending=false;
+   }
+
+   // Suppress MT4's native Backspace chart command outside Journal editors.
+   // Keep keyboard control disabled until the next mouse interaction so MT4
+   // cannot immediately run its native chart shortcut after this handler.
+   if(id==CHARTEVENT_KEYDOWN && (int)lparam==8 &&
+      !(g_RG_GUI_JournalDescriptionOpen && g_RG_GUI_JournalDescriptionEditFocused) &&
+      !(g_RG_GUI_JournalReportOpen && g_RG_GUI_JournalReportEditFocused) &&
+      !(g_RG_GUI_JournalEditType>=0 && g_RG_GUI_JournalEditFocused))
+   {
+      ChartSetInteger(0,CHART_KEYBOARD_CONTROL,false);
+      g_RG_BackspaceKeyboardRestorePending=true;
+      return;
+   }
    // Locked builds keep the panel visible but ignore all chart controls.
    if(!RG_LicenseIsValid())
    {

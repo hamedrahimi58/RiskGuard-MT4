@@ -5033,6 +5033,24 @@ void RG_GUI_UpdateJournalRangeSummary()
 }
 
 
+// Recover user-created chart objects left non-selectable by an interrupted
+// Journal dialog in an earlier EA build. Keep RiskGuard-owned objects out of
+// this recovery pass so panel controls retain their intended behavior.
+void RG_GUI_JournalRecoverUserChartObjects()
+{
+   int total=ObjectsTotal(0,0,-1);
+   for(int i=0;i<total;i++)
+   {
+      string n=ObjectName(0,i,0,-1);
+      if(n=="") continue;
+      if(StringFind(n,"RG_",0)==0) continue;
+      // These are user/indicator chart objects, not RiskGuard UI objects.
+      // Clear stale selection and restore normal chart selectability.
+      ObjectSetInteger(0,n,OBJPROP_SELECTED,false);
+      ObjectSetInteger(0,n,OBJPROP_SELECTABLE,true);
+   }
+}
+
 // While the rename dialog is open, MT4 must not have any chart object
 // selected.  Otherwise Backspace is interpreted by the terminal as the
 // Delete-Selected-Object command after our custom keyboard handler runs.
@@ -5043,6 +5061,11 @@ int    g_RG_GUI_JournalProtectedCount=0;
 
 void RG_GUI_JournalProtectChartObjects()
 {
+   // Protection can be requested repeatedly while a Journal dialog is open.
+   // Keep the original snapshot until the matching restore call; otherwise a
+   // second call records our own SELECTABLE=false state as the original state.
+   if(g_RG_GUI_JournalProtectedCount>0) return;
+
    g_RG_GUI_JournalProtectedCount=0;
    int total=ObjectsTotal();
    if(total<=0) return;
